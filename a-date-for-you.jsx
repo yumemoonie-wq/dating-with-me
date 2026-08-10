@@ -1,0 +1,1391 @@
+import React, { useState, useEffect, useMemo, useRef } from "react";
+
+/* ============================================================
+   A DATE FOR YOU — a digital love-letter invitation
+   Single-file React artifact. No backend: uses window.storage
+   (persistent key/value) so a created invitation can actually
+   be re-opened by its id, the way a real link would work.
+   ============================================================ */
+
+/* ---------------------------- THEMES ---------------------------- */
+
+const THEMES = {
+  "soft-romantic": {
+    label: "Soft Romantic",
+    bg: "#FBF3EC",
+    bgAlt: "#F5E4E1",
+    card: "#FFFFFF",
+    accent: "#8C2F39",
+    accentSoft: "#F1D2D6",
+    text: "#2B1A1D",
+    textMuted: "#8A7370",
+    displayFont: "'Fraunces', serif",
+    bodyFont: "'Inter', sans-serif",
+    displayStyle: "normal",
+    seal: "🖋️",
+  },
+  "midnight-date": {
+    label: "Midnight Date",
+    bg: "#150F17",
+    bgAlt: "#20161F",
+    card: "#271B29",
+    accent: "#D98A94",
+    accentSoft: "#4A2E33",
+    text: "#F4E9E7",
+    textMuted: "#B49B9C",
+    displayFont: "'Fraunces', serif",
+    bodyFont: "'Inter', sans-serif",
+    displayStyle: "italic",
+    seal: "🌙",
+  },
+  "sunny-day": {
+    label: "Sunny Day",
+    bg: "#FFF8E6",
+    bgAlt: "#FFEFC2",
+    card: "#FFFFFF",
+    accent: "#3E86A0",
+    accentSoft: "#FFE3A3",
+    text: "#33291A",
+    textMuted: "#8E7B54",
+    displayFont: "'Fraunces', serif",
+    bodyFont: "'Inter', sans-serif",
+    displayStyle: "normal",
+    seal: "☀️",
+  },
+  "love-letter": {
+    label: "Love Letter",
+    bg: "#F1E6D2",
+    bgAlt: "#E7D8B8",
+    card: "#FBF5E7",
+    accent: "#7A2E2E",
+    accentSoft: "#E4CBAE",
+    text: "#3A2B1F",
+    textMuted: "#8A7355",
+    displayFont: "'Caveat', cursive",
+    bodyFont: "'Newsreader', serif",
+    displayStyle: "normal",
+    seal: "✉️",
+  },
+};
+
+/* ---------------------------- SAMPLE DATA ---------------------------- */
+
+const sampleInvitation = {
+  id: "maya-and-alex",
+  senderName: "Alex",
+  recipientName: "Maya",
+  theme: "soft-romantic",
+  intro:
+    "No big speech. I just want to take you somewhere nice and see what happens.",
+  activities: [
+    { id: "foodie", emoji: "🍝", title: "Foodie Date", desc: "Let's eat something we'll both pretend we could cook." },
+    { id: "creative", emoji: "🎨", title: "Creative Date", desc: "Messy hands, no expectations, just us making something." },
+    { id: "movie", emoji: "🎬", title: "Movie Date", desc: "Dim lights, shared popcorn, zero commentary allowed." },
+    { id: "coffee", emoji: "☕", title: "Coffee & Chat", desc: "Slow mornings and way too much caffeine." },
+  ],
+  locations: [
+    {
+      id: "pottery",
+      name: "Pottery Studio",
+      desc: "Let's make something we'll probably laugh at later.",
+      address: "142 Riverside Lane",
+      duration: "2 hrs",
+      recommended: true,
+      secret: false,
+      emoji: "🏺",
+      forActivities: ["creative"],
+    },
+    {
+      id: "italian",
+      name: "Cozy Italian Restaurant",
+      desc: "Pasta sounds like a good idea, honestly.",
+      address: "8 Vine Street",
+      duration: "1.5 hrs",
+      recommended: false,
+      secret: false,
+      emoji: "🍝",
+      forActivities: ["foodie"],
+    },
+    {
+      id: "rooftop",
+      name: "Rooftop Cinema",
+      desc: "Somewhere with a view. You'll see when we get there.",
+      address: "The Grand Rooftop, 5th Floor",
+      duration: "3 hrs",
+      recommended: false,
+      secret: true,
+      emoji: "🌃",
+      forActivities: ["movie"],
+    },
+    {
+      id: "coffeehouse",
+      name: "The Nook Coffee House",
+      desc: "Corner table, good light, way too much to talk about.",
+      address: "21 Mill Street",
+      duration: "1 hr",
+      recommended: false,
+      secret: false,
+      emoji: "☕",
+      forActivities: ["coffee"],
+    },
+  ],
+  availableDates: ["2026-08-15", "2026-08-16", "2026-08-22"],
+  timeSlots: {
+    "2026-08-15": ["6:00 PM", "6:30 PM", "7:00 PM", "7:30 PM"],
+    "2026-08-16": ["5:00 PM", "5:30 PM", "6:00 PM"],
+    "2026-08-22": ["6:30 PM", "7:00 PM", "7:30 PM", "8:00 PM"],
+  },
+  note:
+    "I've been wanting to ask you this properly for a while.\n\nInstead of sending you a boring \"wanna hang out?\" text, I thought I'd make you something a little more special. Pick whatever sounds good to you — I already know I'll have a good time, because it's with you.\n\nSee you soon.",
+  photo: null,
+  music: null,
+  countdownEnabled: true,
+  createdAt: "2026-08-10",
+};
+
+const monthLabel = (dateStr) =>
+  new Date(dateStr + "T00:00:00").toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  });
+
+/* ---------------------------- SMALL UI HELPERS ---------------------------- */
+
+function ProgressThread({ steps, activeIndex }) {
+  return (
+    <div className="progress-thread">
+      {steps.map((s, i) => (
+        <React.Fragment key={s}>
+          <div className={`thread-node ${i <= activeIndex ? "on" : ""} ${i === activeIndex ? "current" : ""}`}>
+            <span className="thread-num">{String(i + 1).padStart(2, "0")}</span>
+            <span className="thread-label">{s}</span>
+          </div>
+          {i < steps.length - 1 && <div className={`thread-line ${i < activeIndex ? "on" : ""}`} />}
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
+
+function FloatingHearts({ show }) {
+  const hearts = useMemo(
+    () =>
+      Array.from({ length: 18 }).map((_, i) => ({
+        id: i,
+        left: Math.random() * 100,
+        delay: Math.random() * 0.6,
+        duration: 2.4 + Math.random() * 1.6,
+        size: 12 + Math.random() * 18,
+        emoji: Math.random() > 0.5 ? "❤️" : "✨",
+      })),
+    [show]
+  );
+  if (!show) return null;
+  return (
+    <div className="hearts-layer" aria-hidden="true">
+      {hearts.map((h) => (
+        <span
+          key={h.id}
+          className="falling-heart"
+          style={{
+            left: `${h.left}%`,
+            fontSize: `${h.size}px`,
+            animationDelay: `${h.delay}s`,
+            animationDuration: `${h.duration}s`,
+          }}
+        >
+          {h.emoji}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function SealButton({ children, onClick, variant = "primary", disabled, style }) {
+  const [pressed, setPressed] = useState(false);
+  return (
+    <button
+      className={`seal-btn ${variant} ${pressed ? "pressed" : ""}`}
+      disabled={disabled}
+      style={style}
+      onClick={(e) => {
+        setPressed(true);
+        setTimeout(() => setPressed(false), 220);
+        onClick && onClick(e);
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+/* ---------------------------- LANDING ---------------------------- */
+
+function Landing({ onOpen, onGoCreate, onLoadById }) {
+  const [opening, setOpening] = useState(false);
+  const [idInput, setIdInput] = useState("");
+  const [idError, setIdError] = useState("");
+
+  const handleOpen = () => {
+    setOpening(true);
+    setTimeout(onOpen, 950);
+  };
+
+  return (
+    <div className="landing">
+      <FloatingHearts show={false} />
+      <div className="landing-decor" aria-hidden="true">
+        <span className="drift d1">❤</span>
+        <span className="drift d2">✦</span>
+        <span className="drift d3">❤</span>
+        <span className="drift d4">✦</span>
+      </div>
+
+      <div className="landing-copy">
+        <p className="eyebrow">A little something arrived for you</p>
+        <h1 className="hero-title">
+          Someone has a<br /> date planned for you.
+        </h1>
+        <p className="hero-sub">A little invitation, made just for you.</p>
+
+        <div className={`envelope ${opening ? "opening" : ""}`} onClick={handleOpen} role="button" tabIndex={0}
+             onKeyDown={(e) => e.key === "Enter" && handleOpen()}>
+          <div className="envelope-back" />
+          <div className="envelope-letter">
+            <div className="letter-lines">
+              <span /><span /><span />
+              <span className="letter-heart">♥</span>
+            </div>
+          </div>
+          <div className="envelope-flap" />
+          <div className="envelope-front-left" />
+          <div className="envelope-front-right" />
+          <div className="envelope-seal">{opening ? "" : "♥"}</div>
+        </div>
+
+        <SealButton onClick={handleOpen} disabled={opening}>
+          {opening ? "Opening…" : "Open the Invitation"}
+        </SealButton>
+
+        <div className="landing-footer">
+          <button className="link-btn" onClick={onGoCreate}>Make one for someone ✎</button>
+          <div className="id-loader">
+            <input
+              value={idInput}
+              onChange={(e) => { setIdInput(e.target.value); setIdError(""); }}
+              placeholder="Have an invitation code?"
+            />
+            <button
+              className="link-btn"
+              onClick={async () => {
+                if (!idInput.trim()) return;
+                const ok = await onLoadById(idInput.trim());
+                if (!ok) setIdError("Couldn't find that invitation.");
+              }}
+            >
+              Open →
+            </button>
+          </div>
+          {idError && <p className="id-error">{idError}</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------- RECIPIENT FLOW ---------------------------- */
+
+const DODGE_MESSAGES = [
+  "Nice try 😏",
+  "Nope, not that easy",
+  "Almost had it!",
+  "You're persistent…",
+  "Still no 😌",
+  "Keep trying, I dare you",
+];
+
+function HelloStep({ invitation, onYes }) {
+  const [dodgeAttempts, setDodgeAttempts] = useState(0);
+  const [dodgeStyle, setDodgeStyle] = useState({});
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [confirmAttempts, setConfirmAttempts] = useState(0);
+  const [confirmStyle, setConfirmStyle] = useState({});
+
+  const dodge = (setStyle) => {
+    const x = (Math.random() - 0.5) * 130;
+    const y = (Math.random() - 0.5) * 54;
+    const r = (Math.random() - 0.5) * 14;
+    setStyle({ transform: `translate(${x}px, ${y}px) rotate(${r}deg)` });
+  };
+
+  const handleThinkTap = () => {
+    if (dodgeAttempts < 3) {
+      dodge(setDodgeStyle);
+      setDodgeAttempts((a) => a + 1);
+    } else {
+      setDodgeStyle({});
+      setShowConfirm(true);
+    }
+  };
+
+  const handleImSureTap = () => {
+    dodge(setConfirmStyle);
+    setConfirmAttempts((a) => a + 1);
+  };
+
+  const closeConfirm = () => {
+    setShowConfirm(false);
+    setConfirmAttempts(0);
+    setConfirmStyle({});
+    setDodgeAttempts(0);
+    setDodgeStyle({});
+  };
+
+  return (
+    <div className="stage fade-in">
+      <p className="eyebrow">Hey, {invitation.recipientName}.</p>
+      <h2 className="stage-title">Will you go on<br />a date with me?</h2>
+      <p className="stage-body intro-text">{invitation.intro}</p>
+
+      <div className="hello-buttons">
+        <SealButton onClick={onYes}>Yes, I'd love to 💕</SealButton>
+        <div className="dodge-wrap">
+          <button
+            className="seal-btn ghost dodge-btn"
+            style={dodgeStyle}
+            onClick={handleThinkTap}
+          >
+            Let me think…
+          </button>
+          {dodgeAttempts > 0 && !showConfirm && (
+            <span className="dodge-caption fade-in">{DODGE_MESSAGES[dodgeAttempts - 1] || DODGE_MESSAGES[0]}</span>
+          )}
+        </div>
+      </div>
+
+      {showConfirm && (
+        <div className="confirm-overlay" onClick={closeConfirm}>
+          <div className="confirm-card fade-in" onClick={(e) => e.stopPropagation()}>
+            <button className="confirm-close" onClick={closeConfirm} aria-label="Close">✕</button>
+            <p className="confirm-title">Wait… are you sure? :c</p>
+            <p className="confirm-sub">
+              {confirmAttempts === 0 && "Take your time."}
+              {confirmAttempts > 0 && confirmAttempts < 4 && "Hmm, that button seems a little shy…"}
+              {confirmAttempts >= 4 && "Okay, it's genuinely never going to let you click it 😌"}
+            </p>
+            <div className="confirm-buttons">
+              <button className="seal-btn ghost dodge-btn small" style={confirmStyle} onClick={handleImSureTap}>
+                I'm sure 😢
+              </button>
+              <SealButton onClick={onYes}>Okay, yes! 💕</SealButton>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ActivityStep({ invitation, selected, onSelect, onNext }) {
+  return (
+    <div className="stage fade-in">
+      <h2 className="stage-title">What should we<br />do together?</h2>
+      <div className="card-grid">
+        {invitation.activities.map((a) => (
+          <button
+            key={a.id}
+            className={`option-card ${selected === a.id ? "selected" : ""}`}
+            onClick={() => onSelect(a.id)}
+          >
+            <span className="option-emoji">{a.emoji}</span>
+            <span className="option-title">{a.title}</span>
+            <span className="option-desc">{a.desc}</span>
+            {selected === a.id && <span className="check-badge">✓</span>}
+          </button>
+        ))}
+      </div>
+      <SealButton onClick={onNext} disabled={!selected}>Next →</SealButton>
+    </div>
+  );
+}
+
+function LocationStep({ invitation, activityId, selected, onSelect, onNext }) {
+  const activity = invitation.activities.find((a) => a.id === activityId);
+  const tagged = invitation.locations.filter(
+    (loc) => Array.isArray(loc.forActivities) && loc.forActivities.length > 0 && loc.forActivities.includes(activityId)
+  );
+  // Fall back to every location if nothing was tagged for this activity (e.g. sender didn't tag it)
+  const visibleLocations = tagged.length > 0 ? tagged : invitation.locations;
+
+  return (
+    <div className="stage fade-in">
+      <h2 className="stage-title">Where should<br />we go?</h2>
+      {activity && (
+        <p className="stage-body" style={{ marginTop: -8 }}>
+          Good spots for {activity.emoji} {activity.title.toLowerCase()}.
+        </p>
+      )}
+      <div className="location-list">
+        {visibleLocations.map((loc) => {
+          const isSecret = loc.secret && selected !== loc.id;
+          return (
+            <button
+              key={loc.id}
+              className={`location-card ${selected === loc.id ? "selected" : ""}`}
+              onClick={() => onSelect(loc.id)}
+            >
+              <div className="location-emoji">{loc.emoji}</div>
+              <div className="location-info">
+                <div className="location-name-row">
+                  <span className="location-name">{isSecret ? "A secret spot 🤫" : loc.name}</span>
+                  {loc.recommended && <span className="badge-rec">✨ Recommended</span>}
+                </div>
+                <p className="location-desc">{isSecret ? "You'll find out once the date is confirmed." : loc.desc}</p>
+                {!isSecret && (
+                  <div className="location-meta">
+                    {loc.address && <span>{loc.address}</span>}
+                    {loc.duration && <span>· {loc.duration}</span>}
+                  </div>
+                )}
+              </div>
+              {selected === loc.id && <span className="check-badge">✓</span>}
+            </button>
+          );
+        })}
+      </div>
+      <SealButton onClick={onNext} disabled={!selected}>Next →</SealButton>
+    </div>
+  );
+}
+
+function DateStep({ invitation, date, time, onDate, onTime, onNext }) {
+  const monthDate = new Date(invitation.availableDates[0] + "T00:00:00");
+  const year = monthDate.getFullYear();
+  const month = monthDate.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const startWeekday = firstDay.getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const monthName = firstDay.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+
+  const cells = [];
+  for (let i = 0; i < startWeekday; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+
+  const toStr = (d) => `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+
+  return (
+    <div className="stage fade-in">
+      <h2 className="stage-title">When can I steal<br />you for a few hours?</h2>
+
+      <div className="calendar">
+        <p className="calendar-month">{monthName}</p>
+        <div className="calendar-grid weekday-row">
+          {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => <span key={i}>{d}</span>)}
+        </div>
+        <div className="calendar-grid">
+          {cells.map((d, i) => {
+            if (!d) return <span key={i} className="cal-cell empty" />;
+            const str = toStr(d);
+            const available = invitation.availableDates.includes(str);
+            const isSelected = date === str;
+            return (
+              <button
+                key={i}
+                className={`cal-cell ${available ? "available" : "disabled"} ${isSelected ? "selected" : ""}`}
+                disabled={!available}
+                onClick={() => onDate(str)}
+              >
+                {d}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {date && invitation.timeSlots[date] && (
+        <div className="time-slots fade-in">
+          <p className="slots-label">{monthLabel(date)} — available times</p>
+          <div className="slots-row">
+            {invitation.timeSlots[date].map((t) => (
+              <button
+                key={t}
+                className={`slot-pill ${time === t ? "selected" : ""}`}
+                onClick={() => onTime(t)}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <SealButton onClick={onNext} disabled={!date || !time}>Next →</SealButton>
+    </div>
+  );
+}
+
+function NoteStep({ invitation, onNext }) {
+  return (
+    <div className="stage fade-in">
+      <h2 className="stage-title">There's something<br />I wanted to tell you…</h2>
+      <div className="letter-card">
+        {invitation.photo && <img src={invitation.photo} alt="" className="letter-photo" />}
+        <p className="letter-body">
+          {invitation.note.split("\n\n").map((p, i) => <React.Fragment key={i}>{p}<br /><br /></React.Fragment>)}
+        </p>
+        <p className="letter-sign">— {invitation.senderName}</p>
+      </div>
+      <SealButton onClick={onNext}>Continue →</SealButton>
+    </div>
+  );
+}
+
+function SummaryStep({ invitation, selection, onConfirm }) {
+  const activity = invitation.activities.find((a) => a.id === selection.activity);
+  const location = invitation.locations.find((l) => l.id === selection.location);
+  return (
+    <div className="stage fade-in">
+      <h2 className="stage-title">It's a date! 🥹</h2>
+      <div className="summary-card">
+        <div className="summary-row"><span className="summary-label">Date</span><span>{monthLabel(selection.date)}</span></div>
+        <div className="summary-row"><span className="summary-label">Time</span><span>{selection.time}</span></div>
+        <div className="summary-row"><span className="summary-label">Activity</span><span>{activity?.emoji} {activity?.title}</span></div>
+        <div className="summary-row"><span className="summary-label">Place</span><span>{location?.secret ? "A secret spot 🤫" : location?.name}</span></div>
+      </div>
+      <div className="hello-buttons">
+        <SealButton onClick={onConfirm}>Confirm Date</SealButton>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmedScreen({ invitation, selection }) {
+  const [copied, setCopied] = useState(false);
+  const activity = invitation.activities.find((a) => a.id === selection.activity);
+  const location = invitation.locations.find((l) => l.id === selection.location);
+  const [showHearts, setShowHearts] = useState(true);
+  useEffect(() => {
+    const t = setTimeout(() => setShowHearts(false), 3200);
+    return () => clearTimeout(t);
+  }, []);
+
+  const [countdown, setCountdown] = useState("");
+  useEffect(() => {
+    if (!invitation.countdownEnabled) return;
+    const target = new Date(`${selection.date}T${to24h(selection.time)}`);
+    const tick = () => {
+      const diff = target - new Date();
+      if (diff <= 0) { setCountdown("It's today! 💌"); return; }
+      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+      const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
+      const mins = Math.floor((diff / (1000 * 60)) % 60);
+      setCountdown(`${String(days).padStart(2, "0")}d ${String(hours).padStart(2, "0")}h ${String(mins).padStart(2, "0")}m`);
+    };
+    tick();
+    const id = setInterval(tick, 30000);
+    return () => clearInterval(id);
+  }, [invitation.countdownEnabled, selection]);
+
+  const gcalLink = () => {
+    const start = new Date(`${selection.date}T${to24h(selection.time)}`);
+    const end = new Date(start.getTime() + 90 * 60000);
+    const fmt = (d) => d.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+    const title = encodeURIComponent(`Date: ${activity?.title || "Our date"}`);
+    const details = encodeURIComponent(`With ${invitation.senderName} & ${invitation.recipientName}.\n${invitation.note.split("\n")[0]}`);
+    const loc = encodeURIComponent(location?.secret ? "Secret location" : (location?.address || location?.name || ""));
+    return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&dates=${fmt(start)}/${fmt(end)}&details=${details}&location=${loc}`;
+  };
+
+  const shareText = () =>
+    `It's a date 💌\n${monthLabel(selection.date)} at ${selection.time}\n${activity?.emoji} ${activity?.title}\n📍 ${location?.secret ? "Secret spot — surprise!" : location?.name}`;
+
+  const handleShare = async () => {
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: "It's a date!", text: shareText() });
+      } else {
+        await navigator.clipboard.writeText(shareText());
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }
+    } catch (e) { /* user cancelled share, ignore */ }
+  };
+
+  return (
+    <div className="stage fade-in confirmed-stage">
+      <FloatingHearts show={showHearts} />
+      <p className="eyebrow">Confirmed</p>
+      <h2 className="stage-title">It's officially<br />a date. 💌</h2>
+
+      <div className="summary-card">
+        <div className="summary-row"><span className="summary-label">Date</span><span>{monthLabel(selection.date)}</span></div>
+        <div className="summary-row"><span className="summary-label">Time</span><span>{selection.time}</span></div>
+        <div className="summary-row"><span className="summary-label">Activity</span><span>{activity?.emoji} {activity?.title}</span></div>
+        <div className="summary-row"><span className="summary-label">Place</span><span>{location?.secret ? "A secret spot 🤫" : location?.name}</span></div>
+        <div className="summary-row note-row">
+          <span className="summary-label">A note from {invitation.senderName}</span>
+          <span className="note-preview">{invitation.note.split("\n\n")[0]}</span>
+        </div>
+      </div>
+
+      {invitation.countdownEnabled && countdown && (
+        <div className="countdown-block">
+          <p className="countdown-label">Our date is in</p>
+          <p className="countdown-value">{countdown}</p>
+        </div>
+      )}
+
+      <div className="hello-buttons">
+        <a className="seal-btn primary" href={gcalLink()} target="_blank" rel="noopener noreferrer">Add to Calendar</a>
+        <SealButton variant="ghost" onClick={handleShare}>{copied ? "Copied ✓" : "Share Details"}</SealButton>
+      </div>
+    </div>
+  );
+}
+
+function to24h(t) {
+  const [time, ampm] = t.split(" ");
+  let [h, m] = time.split(":").map(Number);
+  if (ampm === "PM" && h !== 12) h += 12;
+  if (ampm === "AM" && h === 12) h = 0;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:00`;
+}
+
+function RecipientFlow({ invitation, onBackToLanding }) {
+  const [step, setStep] = useState("hello");
+  const [selection, setSelection] = useState({ activity: null, location: null, date: null, time: null });
+
+  const stepOrder = ["activity", "location", "date", "note"];
+  const stepLabels = { activity: "Activity", location: "Place", date: "Date", note: "A little note" };
+  const activeIndex = stepOrder.indexOf(step);
+
+  return (
+    <div className="recipient-flow">
+      {activeIndex >= 0 && (
+        <ProgressThread steps={stepOrder.map((s) => stepLabels[s])} activeIndex={activeIndex} />
+      )}
+
+      {step === "hello" && <HelloStep invitation={invitation} onYes={() => setStep("activity")} />}
+
+      {step === "activity" && (
+        <ActivityStep
+          invitation={invitation}
+          selected={selection.activity}
+          onSelect={(id) =>
+            setSelection((s) => (s.activity === id ? s : { ...s, activity: id, location: null }))
+          }
+          onNext={() => setStep("location")}
+        />
+      )}
+
+      {step === "location" && (
+        <LocationStep
+          invitation={invitation}
+          activityId={selection.activity}
+          selected={selection.location}
+          onSelect={(id) => setSelection((s) => ({ ...s, location: id }))}
+          onNext={() => setStep("date")}
+        />
+      )}
+
+      {step === "date" && (
+        <DateStep
+          invitation={invitation}
+          date={selection.date}
+          time={selection.time}
+          onDate={(d) => setSelection((s) => ({ ...s, date: d, time: null }))}
+          onTime={(t) => setSelection((s) => ({ ...s, time: t }))}
+          onNext={() => setStep("note")}
+        />
+      )}
+
+      {step === "note" && <NoteStep invitation={invitation} onNext={() => setStep("summary")} />}
+
+      {step === "summary" && (
+        <SummaryStep invitation={invitation} selection={selection} onConfirm={() => setStep("confirmed")} />
+      )}
+
+      {step === "confirmed" && <ConfirmedScreen invitation={invitation} selection={selection} />}
+
+      {step !== "confirmed" && (
+        <button className="link-btn back-link" onClick={onBackToLanding}>← back to start</button>
+      )}
+    </div>
+  );
+}
+
+/* ---------------------------- CREATE FLOW (SENDER) ---------------------------- */
+
+const ALL_ACTIVITIES = [
+  { id: "foodie", emoji: "🍝", title: "Foodie Date", desc: "Let's eat something we'll both pretend we could cook." },
+  { id: "creative", emoji: "🎨", title: "Creative Date", desc: "Messy hands, no expectations, just us making something." },
+  { id: "movie", emoji: "🎬", title: "Movie Date", desc: "Dim lights, shared popcorn, zero commentary allowed." },
+  { id: "coffee", emoji: "☕", title: "Coffee & Chat", desc: "Slow mornings and way too much caffeine." },
+  { id: "slow", emoji: "🌿", title: "Slow Day", desc: "No plans. No rush. Just us." },
+  { id: "spontaneous", emoji: "🎢", title: "Something Spontaneous", desc: "You pick when we get there." },
+];
+
+function uid() {
+  return Math.random().toString(36).slice(2, 8);
+}
+
+function CreateFlow({ onGenerated, onCancel }) {
+  const [step, setStep] = useState(1);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [form, setForm] = useState({
+    senderName: "",
+    recipientName: "",
+    theme: "soft-romantic",
+    activities: [],
+    locations: [{ id: uid(), name: "", desc: "", address: "", recommended: false, secret: false, emoji: "📍", forActivities: [] }],
+    availableDates: [],
+    timeSlots: {},
+    note: "",
+    photo: null,
+    countdownEnabled: true,
+  });
+
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const toggleActivity = (id) => {
+    setForm((f) => ({
+      ...f,
+      activities: f.activities.includes(id) ? f.activities.filter((a) => a !== id) : [...f.activities, id],
+    }));
+  };
+
+  const updateLocation = (id, patch) => {
+    setForm((f) => ({ ...f, locations: f.locations.map((l) => (l.id === id ? { ...l, ...patch } : l)) }));
+  };
+  const addLocation = () =>
+    setForm((f) => ({ ...f, locations: [...f.locations, { id: uid(), name: "", desc: "", address: "", recommended: false, secret: false, emoji: "📍", forActivities: [] }] }));
+  const removeLocation = (id) =>
+    setForm((f) => ({ ...f, locations: f.locations.filter((l) => l.id !== id) }));
+  const toggleLocationActivity = (locId, actId) => {
+    setForm((f) => ({
+      ...f,
+      locations: f.locations.map((l) =>
+        l.id === locId
+          ? { ...l, forActivities: l.forActivities.includes(actId) ? l.forActivities.filter((a) => a !== actId) : [...l.forActivities, actId] }
+          : l
+      ),
+    }));
+  };
+
+  const toggleDate = (dateStr) => {
+    setForm((f) => {
+      const has = f.availableDates.includes(dateStr);
+      const availableDates = has ? f.availableDates.filter((d) => d !== dateStr) : [...f.availableDates, dateStr];
+      const timeSlots = { ...f.timeSlots };
+      if (has) delete timeSlots[dateStr];
+      else timeSlots[dateStr] = ["6:00 PM", "6:30 PM", "7:00 PM"];
+      return { ...f, availableDates, timeSlots };
+    });
+  };
+
+  const totalSteps = 8;
+  const canNext = {
+    1: form.senderName.trim() && form.recipientName.trim(),
+    2: form.activities.length > 0,
+    3: form.locations.some((l) => l.name.trim()),
+    4: form.availableDates.length > 0,
+    5: form.note.trim().length > 0,
+    6: true,
+    7: true,
+  }[step] ?? true;
+
+  const generate = async () => {
+    setSaving(true);
+    setError("");
+    const id = `${form.recipientName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${uid()}`;
+    const invitation = {
+      id,
+      senderName: form.senderName.trim(),
+      recipientName: form.recipientName.trim(),
+      theme: form.theme,
+      intro: "I made this instead of just texting you — figured you're worth the extra effort.",
+      activities: ALL_ACTIVITIES.filter((a) => form.activities.includes(a.id)),
+      locations: form.locations.filter((l) => l.name.trim()),
+      availableDates: form.availableDates.sort(),
+      timeSlots: form.timeSlots,
+      note: form.note.trim(),
+      photo: form.photo,
+      countdownEnabled: form.countdownEnabled,
+      createdAt: new Date().toISOString().slice(0, 10),
+    };
+    try {
+      const res = await window.storage.set(`invite:${id}`, JSON.stringify(invitation), true);
+      if (!res) throw new Error("save failed");
+      onGenerated(invitation);
+    } catch (e) {
+      setError("Something went wrong saving your invitation. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const monthDate = form.availableDates[0] ? new Date(form.availableDates[0] + "T00:00:00") : new Date(2026, 7, 1);
+  const year = monthDate.getFullYear();
+  const month = monthDate.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const startWeekday = firstDay.getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const monthName = firstDay.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  const cells = [];
+  for (let i = 0; i < startWeekday; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  const toStr = (d) => `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+
+  return (
+    <div className="create-flow">
+      <div className="create-header">
+        <button className="link-btn" onClick={onCancel}>← Cancel</button>
+        <span className="create-step-count">Step {Math.min(step, totalSteps)} of {totalSteps}</span>
+      </div>
+      <div className="create-progress-bar">
+        <div className="create-progress-fill" style={{ width: `${(Math.min(step, totalSteps) / totalSteps) * 100}%` }} />
+      </div>
+
+      <div className="create-body fade-in" key={step}>
+        {step === 1 && (
+          <>
+            <h2 className="stage-title small">Who's this for?</h2>
+            <label className="field-label">Your name</label>
+            <input className="text-input" value={form.senderName} onChange={(e) => set("senderName", e.target.value)} placeholder="Alex" />
+            <label className="field-label">Their name</label>
+            <input className="text-input" value={form.recipientName} onChange={(e) => set("recipientName", e.target.value)} placeholder="Maya" />
+          </>
+        )}
+
+        {step === 2 && (
+          <>
+            <h2 className="stage-title small">What could you do together?</h2>
+            <p className="stage-body">Pick as many as you like — they'll get to choose.</p>
+            <div className="card-grid">
+              {ALL_ACTIVITIES.map((a) => (
+                <button key={a.id} className={`option-card small ${form.activities.includes(a.id) ? "selected" : ""}`} onClick={() => toggleActivity(a.id)}>
+                  <span className="option-emoji">{a.emoji}</span>
+                  <span className="option-title">{a.title}</span>
+                  {form.activities.includes(a.id) && <span className="check-badge">✓</span>}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+
+        {step === 3 && (
+          <>
+            <h2 className="stage-title small">Where could you take them?</h2>
+            {form.locations.map((loc, i) => (
+              <div className="loc-editor" key={loc.id}>
+                <div className="loc-editor-row">
+                  <input className="text-input" placeholder="Location name" value={loc.name} onChange={(e) => updateLocation(loc.id, { name: e.target.value })} />
+                  {form.locations.length > 1 && <button className="icon-x" onClick={() => removeLocation(loc.id)}>✕</button>}
+                </div>
+                <input className="text-input" placeholder="A short description" value={loc.desc} onChange={(e) => updateLocation(loc.id, { desc: e.target.value })} />
+                <input className="text-input" placeholder="Address (optional)" value={loc.address} onChange={(e) => updateLocation(loc.id, { address: e.target.value })} />
+                <div className="loc-toggles">
+                  <label className="toggle-label"><input type="checkbox" checked={loc.recommended} onChange={(e) => updateLocation(loc.id, { recommended: e.target.checked })} /> ✨ Recommended</label>
+                  <label className="toggle-label"><input type="checkbox" checked={loc.secret} onChange={(e) => updateLocation(loc.id, { secret: e.target.checked })} /> 🤫 Secret until confirmed</label>
+                </div>
+                {form.activities.length > 0 && (
+                  <>
+                    <p className="field-label" style={{ margin: "10px 0 6px" }}>Good fit for which activities?</p>
+                    <div className="loc-toggles">
+                      {ALL_ACTIVITIES.filter((a) => form.activities.includes(a.id)).map((a) => (
+                        <label className="toggle-label" key={a.id}>
+                          <input type="checkbox" checked={loc.forActivities.includes(a.id)} onChange={() => toggleLocationActivity(loc.id, a.id)} />
+                          {a.emoji} {a.title}
+                        </label>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
+            <button className="link-btn" onClick={addLocation}>+ Add another location</button>
+          </>
+        )}
+
+        {step === 4 && (
+          <>
+            <h2 className="stage-title small">When are you free?</h2>
+            <p className="stage-body">Tap dates to mark them available.</p>
+            <div className="calendar">
+              <p className="calendar-month">{monthName}</p>
+              <div className="calendar-grid weekday-row">{["S", "M", "T", "W", "T", "F", "S"].map((d, i) => <span key={i}>{d}</span>)}</div>
+              <div className="calendar-grid">
+                {cells.map((d, i) => {
+                  if (!d) return <span key={i} className="cal-cell empty" />;
+                  const str = toStr(d);
+                  const isOn = form.availableDates.includes(str);
+                  return (
+                    <button key={i} className={`cal-cell available ${isOn ? "selected" : ""}`} onClick={() => toggleDate(str)}>{d}</button>
+                  );
+                })}
+              </div>
+            </div>
+          </>
+        )}
+
+        {step === 5 && (
+          <>
+            <h2 className="stage-title small">Write them a note</h2>
+            <textarea className="text-area" rows={7} value={form.note} onChange={(e) => set("note", e.target.value)} placeholder="I've been meaning to ask you this properly..." />
+          </>
+        )}
+
+        {step === 6 && (
+          <>
+            <h2 className="stage-title small">A few finishing touches</h2>
+            <label className="toggle-label block"><input type="checkbox" checked={form.countdownEnabled} onChange={(e) => set("countdownEnabled", e.target.checked)} /> Show a live countdown once confirmed</label>
+            <p className="field-label" style={{ marginTop: 20 }}>Choose a theme</p>
+            <div className="theme-grid">
+              {Object.entries(THEMES).map(([key, t]) => {
+                const isSelected = form.theme === key;
+                return (
+                  <button
+                    key={key}
+                    className={`theme-swatch ${isSelected ? "selected" : ""}`}
+                    style={{
+                      background: t.bg,
+                      color: t.text,
+                      borderColor: isSelected ? t.accent : "transparent",
+                    }}
+                    onClick={() => set("theme", key)}
+                  >
+                    <span style={{ color: t.accent }}>{t.seal}</span> {t.label}
+                    {isSelected && <span className="theme-check" style={{ background: t.accent }}>✓</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
+
+        {step === 7 && (
+          <>
+            <h2 className="stage-title small">Here's what they'll see</h2>
+            <div className="preview-frame">
+              <div className={`theme-${form.theme} preview-inner`}>
+                <p className="eyebrow">Hey, {form.recipientName || "Someone"}.</p>
+                <h2 className="stage-title" style={{ fontSize: "1.7rem" }}>Will you go on<br />a date with me?</h2>
+                <p className="stage-body">I made this instead of just texting you — figured you're worth the extra effort.</p>
+                <div className="hello-buttons"><span className="seal-btn primary preview-disabled">Yes, I'd love to 💕</span></div>
+              </div>
+            </div>
+            <p className="stage-body" style={{ marginTop: 14 }}>
+              {form.activities.length} activities · {form.locations.filter(l=>l.name.trim()).length} locations · {form.availableDates.length} available dates
+            </p>
+          </>
+        )}
+
+        {step === 8 && (
+          <div className="generated-block">
+            <h2 className="stage-title small">Your invitation is ready 💌</h2>
+            <p className="stage-body">Send this to {form.recipientName} — it'll open exactly what you just previewed.</p>
+          </div>
+        )}
+      </div>
+
+      {error && <p className="id-error">{error}</p>}
+
+      <div className="hello-buttons create-nav">
+        {step > 1 && step < 8 && <SealButton variant="ghost" onClick={() => setStep((s) => s - 1)}>← Back</SealButton>}
+        {step < 7 && <SealButton onClick={() => setStep((s) => s + 1)} disabled={!canNext}>Next →</SealButton>}
+        {step === 7 && <SealButton onClick={() => { setStep(8); generate(); }}>Generate Invitation ✉️</SealButton>}
+      </div>
+
+      {step === 8 && (
+        <GeneratedLink saving={saving} form={form} onGenerated={onGenerated} />
+      )}
+    </div>
+  );
+}
+
+function GeneratedLink({ saving, onGenerated }) {
+  // This just renders link controls once App has the generated invitation (passed via onGenerated already called).
+  return null;
+}
+
+/* ---------------------------- APP SHELL ---------------------------- */
+
+export default function App() {
+  const [mode, setMode] = useState("landing"); // landing | recipient | create | created
+  const [invitation, setInvitation] = useState(sampleInvitation);
+  const [createdInvitation, setCreatedInvitation] = useState(null);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const [loadingId, setLoadingId] = useState(false);
+
+  const theme = THEMES[invitation.theme] || THEMES["soft-romantic"];
+
+  const loadById = async (id) => {
+    setLoadingId(true);
+    try {
+      const res = await window.storage.get(`invite:${id}`, true);
+      if (!res) { setLoadingId(false); return false; }
+      const data = JSON.parse(res.value);
+      setInvitation(data);
+      setMode("recipient");
+      setLoadingId(false);
+      return true;
+    } catch (e) {
+      setLoadingId(false);
+      return false;
+    }
+  };
+
+  return (
+    <div className={`app-root theme-${invitation.theme}`}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600&family=Caveat:wght@500;600&family=Newsreader:ital,wght@0,400;0,500;1,400&display=swap');
+
+        * { box-sizing: border-box; }
+        .app-root {
+          --bg: ${theme.bg}; --bg-alt: ${theme.bgAlt}; --card: ${theme.card};
+          --accent: ${theme.accent}; --accent-soft: ${theme.accentSoft};
+          --text: ${theme.text}; --text-muted: ${theme.textMuted};
+          --font-display: ${theme.displayFont}; --font-body: ${theme.bodyFont};
+          background: linear-gradient(180deg, var(--bg), var(--bg-alt));
+          color: var(--text);
+          font-family: var(--font-body);
+          min-height: 100vh;
+          width: 100%;
+          padding: 0;
+          position: relative;
+          overflow-x: hidden;
+          transition: background 0.5s ease, color 0.5s ease;
+        }
+        .app-root, .app-root * { box-sizing: border-box; }
+
+        .eyebrow {
+          font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase;
+          color: var(--accent); font-weight: 600; margin: 0 0 10px;
+        }
+        .stage-title {
+          font-family: var(--font-display); font-style: ${theme.displayStyle};
+          font-size: 2.1rem; line-height: 1.15; margin: 0 0 14px; font-weight: 500;
+          letter-spacing: -0.01em;
+        }
+        .theme-love-letter .stage-title { font-size: 2.6rem; }
+        .stage-title.small { font-size: 1.6rem; }
+        .stage-body { color: var(--text-muted); font-size: 0.98rem; line-height: 1.6; margin: 0 0 20px; max-width: 46ch; }
+        .intro-text { font-style: italic; }
+
+        /* ---------- Landing ---------- */
+        .landing { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 40px 20px; position: relative; }
+        .landing-decor { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+        .drift { position: absolute; color: var(--accent-soft); opacity: 0.6; font-size: 1.6rem; animation: drift 9s ease-in-out infinite; }
+        .d1 { top: 12%; left: 8%; animation-delay: 0s; }
+        .d2 { top: 70%; left: 12%; animation-delay: 1.5s; font-size: 1.1rem; }
+        .d3 { top: 20%; right: 10%; animation-delay: 3s; font-size: 1.2rem; }
+        .d4 { top: 75%; right: 14%; animation-delay: 4.5s; }
+        @keyframes drift { 0%,100% { transform: translateY(0px) rotate(0deg); } 50% { transform: translateY(-18px) rotate(8deg); } }
+
+        .landing-copy { max-width: 460px; text-align: center; position: relative; z-index: 1; }
+        .hero-title { font-family: var(--font-display); font-style: ${theme.displayStyle}; font-weight: 500; font-size: 2.6rem; line-height: 1.14; margin: 0 0 12px; letter-spacing: -0.01em; }
+        .hero-sub { color: var(--text-muted); font-size: 1.05rem; margin: 0 0 34px; }
+
+        .envelope { width: 220px; height: 150px; margin: 0 auto 30px; position: relative; cursor: pointer; }
+        .envelope-back { position: absolute; inset: 0; background: var(--accent-soft); border-radius: 6px; }
+        .envelope-letter {
+          position: absolute; left: 10%; right: 10%; top: 8%; height: 84%;
+          background: var(--card); border-radius: 3px; box-shadow: 0 4px 14px rgba(0,0,0,0.12);
+          transform: translateY(0); transition: transform 0.8s cubic-bezier(.2,.8,.2,1);
+          display: flex; align-items: center; justify-content: center; z-index: 1;
+        }
+        .envelope.opening .envelope-letter { transform: translateY(-64px) scale(1.04); }
+        .letter-lines { width: 60%; display: flex; flex-direction: column; gap: 8px; align-items: center; }
+        .letter-lines span { display: block; width: 100%; height: 3px; background: var(--accent-soft); border-radius: 2px; }
+        .letter-heart { color: var(--accent); font-size: 1.1rem; margin-top: 4px; }
+        .envelope-front-left, .envelope-front-right {
+          position: absolute; bottom: 0; width: 50%; height: 60%; background: var(--bg-alt); z-index: 2;
+        }
+        .envelope-front-left { left: 0; clip-path: polygon(0 0, 100% 100%, 0 100%); border-bottom-left-radius: 6px; }
+        .envelope-front-right { right: 0; clip-path: polygon(100% 0, 100% 100%, 0 100%); border-bottom-right-radius: 6px; }
+        .envelope-flap {
+          position: absolute; top: 0; left: 0; right: 0; height: 60%;
+          background: var(--bg-alt); clip-path: polygon(0 0, 100% 0, 50% 85%);
+          transform-origin: top center; transition: transform 0.7s cubic-bezier(.2,.8,.2,1); z-index: 3;
+        }
+        .envelope.opening .envelope-flap { transform: rotateX(180deg); }
+        .envelope-seal {
+          position: absolute; top: 38%; left: 50%; transform: translate(-50%,-50%);
+          width: 34px; height: 34px; border-radius: 50%; background: var(--accent); color: #fff;
+          display: flex; align-items: center; justify-content: center; font-size: 0.95rem; z-index: 4;
+          box-shadow: 0 2px 6px rgba(0,0,0,0.25); transition: opacity 0.3s ease;
+        }
+        .envelope.opening .envelope-seal { opacity: 0; }
+
+        .landing-footer { margin-top: 26px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+        .id-loader { display: flex; gap: 8px; margin-top: 6px; }
+        .id-loader input {
+          font-family: var(--font-body); padding: 8px 12px; border-radius: 20px; border: 1px solid var(--accent-soft);
+          background: var(--card); color: var(--text); font-size: 0.85rem; outline: none; width: 190px;
+        }
+        .id-error { color: var(--accent); font-size: 0.8rem; margin: 2px 0 0; }
+
+        /* ---------- Buttons ---------- */
+        .seal-btn {
+          font-family: var(--font-body); font-weight: 600; font-size: 0.92rem;
+          padding: 13px 26px; border-radius: 30px; border: none; cursor: pointer;
+          background: var(--accent); color: #fff; transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.2s ease;
+          box-shadow: 0 6px 16px -6px color-mix(in srgb, var(--accent) 60%, transparent);
+          text-decoration: none; display: inline-block;
+        }
+        .seal-btn.pressed { transform: scale(0.94); }
+        .seal-btn:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
+        .seal-btn.ghost { background: transparent; color: var(--accent); border: 1.5px solid var(--accent-soft); box-shadow: none; }
+        .seal-btn.preview-disabled { pointer-events: none; opacity: 0.85; }
+        .link-btn {
+          background: none; border: none; color: var(--text-muted); font-family: var(--font-body);
+          font-size: 0.85rem; cursor: pointer; text-decoration: underline; text-underline-offset: 3px;
+          padding: 4px;
+        }
+        .link-btn:hover { color: var(--accent); }
+        .back-link { display: block; margin: 26px auto 0; }
+
+        /* ---------- Stage / flow shell ---------- */
+        .recipient-flow, .create-flow { max-width: 560px; margin: 0 auto; padding: 34px 22px 70px; min-height: 100vh; }
+        .stage { position: relative; }
+        .fade-in { animation: fadeSlide 0.5s ease both; }
+        @keyframes fadeSlide { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* ---------- Progress thread ---------- */
+        .progress-thread { display: flex; align-items: center; margin-bottom: 34px; }
+        .thread-node { display: flex; flex-direction: column; align-items: center; gap: 4px; flex-shrink: 0; }
+        .thread-num {
+          width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+          font-size: 0.66rem; font-weight: 700; background: var(--accent-soft); color: var(--text-muted); transition: all 0.3s ease;
+        }
+        .thread-node.on .thread-num { background: var(--accent); color: #fff; }
+        .thread-node.current .thread-num { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 20%, transparent); }
+        .thread-label { font-size: 0.6rem; color: var(--text-muted); white-space: nowrap; display: none; }
+        .thread-node.current .thread-label { display: block; color: var(--accent); font-weight: 600; }
+        .thread-line { flex: 1; height: 2px; background: var(--accent-soft); margin: 0 4px; position: relative; top: -8px; transition: background 0.4s ease; }
+        .thread-line.on { background: var(--accent); }
+
+        /* ---------- Cards ---------- */
+        .card-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 24px; }
+        .option-card {
+          position: relative; text-align: left; background: var(--card); border: 1.5px solid transparent;
+          border-radius: 16px; padding: 16px; cursor: pointer; display: flex; flex-direction: column; gap: 4px;
+          box-shadow: 0 3px 12px -6px rgba(0,0,0,0.15); transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+          font-family: var(--font-body);
+        }
+        .option-card:hover { transform: translateY(-3px); }
+        .option-card.selected { border-color: var(--accent); box-shadow: 0 8px 20px -8px color-mix(in srgb, var(--accent) 50%, transparent); }
+        .option-card.small { padding: 12px; }
+        .option-emoji { font-size: 1.5rem; }
+        .option-title { font-weight: 600; font-size: 0.92rem; color: var(--text); }
+        .option-desc { font-size: 0.78rem; color: var(--text-muted); line-height: 1.4; }
+        .check-badge {
+          position: absolute; top: 10px; right: 10px; width: 20px; height: 20px; border-radius: 50%;
+          background: var(--accent); color: #fff; font-size: 0.7rem; display: flex; align-items: center; justify-content: center;
+          animation: popIn 0.3s ease;
+        }
+        @keyframes popIn { from { transform: scale(0); } to { transform: scale(1); } }
+
+        .location-list { display: flex; flex-direction: column; gap: 12px; margin-bottom: 24px; }
+        .location-card {
+          position: relative; display: flex; gap: 14px; text-align: left; background: var(--card); border: 1.5px solid transparent;
+          border-radius: 16px; padding: 16px; cursor: pointer; box-shadow: 0 3px 12px -6px rgba(0,0,0,0.15);
+          transition: transform 0.2s ease, border-color 0.2s ease; font-family: var(--font-body);
+        }
+        .location-card:hover { transform: translateY(-2px); }
+        .location-card.selected { border-color: var(--accent); }
+        .location-emoji { font-size: 1.7rem; flex-shrink: 0; }
+        .location-name-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .location-name { font-weight: 600; font-size: 0.95rem; }
+        .badge-rec { font-size: 0.68rem; background: var(--accent-soft); color: var(--accent); padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+        .location-desc { font-size: 0.82rem; color: var(--text-muted); margin: 4px 0 6px; line-height: 1.4; }
+        .location-meta { font-size: 0.74rem; color: var(--text-muted); display: flex; gap: 6px; }
+
+        /* ---------- Calendar ---------- */
+        .calendar { background: var(--card); border-radius: 18px; padding: 18px; margin-bottom: 20px; box-shadow: 0 3px 12px -6px rgba(0,0,0,0.15); }
+        .calendar-month { text-align: center; font-weight: 600; margin: 0 0 12px; font-family: var(--font-display); font-size: 1.1rem; }
+        .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+        .weekday-row span { text-align: center; font-size: 0.68rem; color: var(--text-muted); font-weight: 600; }
+        .cal-cell {
+          aspect-ratio: 1; border: none; border-radius: 10px; background: transparent; font-family: var(--font-body);
+          font-size: 0.82rem; color: var(--text-muted); cursor: default;
+        }
+        .cal-cell.empty { visibility: hidden; }
+        .cal-cell.disabled { opacity: 0.3; }
+        .cal-cell.available { color: var(--text); background: var(--bg-alt); cursor: pointer; transition: transform 0.15s ease, background 0.2s ease; }
+        .cal-cell.available:hover { transform: scale(1.08); }
+        .cal-cell.selected { background: var(--accent); color: #fff; transform: scale(1.05); font-weight: 700; }
+
+        .time-slots { margin-bottom: 20px; }
+        .slots-label { font-size: 0.82rem; color: var(--text-muted); margin: 0 0 10px; }
+        .slots-row { display: flex; flex-wrap: wrap; gap: 8px; }
+        .slot-pill {
+          padding: 9px 16px; border-radius: 20px; border: 1.5px solid var(--accent-soft); background: var(--card);
+          color: var(--text); font-family: var(--font-body); font-size: 0.84rem; cursor: pointer; transition: all 0.2s ease;
+        }
+        .slot-pill.selected { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+        /* ---------- Letter ---------- */
+        .letter-card {
+          background: var(--card); border-radius: 20px; padding: 30px 26px; margin-bottom: 24px;
+          box-shadow: 0 6px 20px -8px rgba(0,0,0,0.18); position: relative;
+        }
+        .theme-love-letter .letter-card { background: repeating-linear-gradient(var(--card), var(--card) 34px, color-mix(in srgb, var(--accent) 8%, var(--card)) 35px); }
+        .letter-photo { width: 100%; border-radius: 12px; margin-bottom: 16px; display: block; }
+        .letter-body { font-family: var(--font-display); font-style: ${theme.displayStyle}; font-size: 1.15rem; line-height: 1.7; margin: 0 0 14px; }
+        .theme-love-letter .letter-body { font-size: 1.5rem; line-height: 1.5; }
+        .letter-sign { text-align: right; font-family: var(--font-display); color: var(--accent); font-size: 1.1rem; margin: 0; }
+
+        /* ---------- Summary ---------- */
+        .summary-card { background: var(--card); border-radius: 18px; padding: 22px; margin-bottom: 24px; box-shadow: 0 4px 16px -8px rgba(0,0,0,0.18); }
+        .summary-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--accent-soft); font-size: 0.92rem; }
+        .summary-row:last-child { border-bottom: none; }
+        .summary-label { color: var(--text-muted); font-weight: 500; }
+        .note-row { flex-direction: column; gap: 6px; }
+        .note-preview { color: var(--text-muted); font-style: italic; font-size: 0.85rem; }
+
+        .countdown-block { text-align: center; margin-bottom: 26px; }
+        .countdown-label { font-size: 0.8rem; color: var(--text-muted); margin: 0 0 4px; }
+        .countdown-value { font-family: var(--font-display); font-size: 1.8rem; color: var(--accent); margin: 0; }
+
+        .hello-buttons { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 6px; align-items: center; }
+
+        .dodge-wrap { position: relative; display: inline-block; }
+        .dodge-btn { transition: transform 0.32s cubic-bezier(.34,1.6,.5,1); will-change: transform; }
+        .dodge-btn.small { padding: 10px 18px; font-size: 0.85rem; }
+        .dodge-caption {
+          position: absolute; top: -26px; left: 50%; transform: translateX(-50%); white-space: nowrap;
+          font-size: 0.72rem; color: var(--accent); font-weight: 600; pointer-events: none;
+        }
+
+        .confirm-overlay {
+          position: fixed; inset: 0; background: rgba(20, 10, 12, 0.42); backdrop-filter: blur(2px);
+          display: flex; align-items: center; justify-content: center; z-index: 80; padding: 20px;
+        }
+        .confirm-card {
+          background: var(--card); border-radius: 22px; padding: 30px 26px; max-width: 320px; width: 100%;
+          text-align: center; position: relative; box-shadow: 0 16px 40px -12px rgba(0,0,0,0.35);
+        }
+        .confirm-close {
+          position: absolute; top: 14px; right: 14px; background: none; border: none; color: var(--text-muted);
+          font-size: 0.9rem; cursor: pointer; width: 26px; height: 26px;
+        }
+        .confirm-title { font-family: var(--font-display); font-style: ${theme.displayStyle}; font-size: 1.35rem; margin: 4px 0 8px; }
+        .confirm-sub { font-size: 0.82rem; color: var(--text-muted); margin: 0 0 20px; min-height: 32px; }
+        .confirm-buttons { display: flex; flex-direction: column; gap: 12px; align-items: center; }
+
+        /* ---------- Hearts ---------- */
+        .hearts-layer { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 50; }
+        .falling-heart { position: absolute; top: -5%; animation-name: fallHeart; animation-timing-function: ease-in; animation-fill-mode: forwards; }
+        @keyframes fallHeart { 0% { transform: translateY(0) rotate(0deg); opacity: 0; } 10% { opacity: 1; } 100% { transform: translateY(110vh) rotate(40deg); opacity: 0; } }
+
+        /* ---------- Create flow ---------- */
+        .create-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+        .create-step-count { font-size: 0.78rem; color: var(--text-muted); }
+        .create-progress-bar { height: 4px; background: var(--accent-soft); border-radius: 4px; margin-bottom: 30px; overflow: hidden; }
+        .create-progress-fill { height: 100%; background: var(--accent); transition: width 0.4s ease; }
+        .field-label { display: block; font-size: 0.8rem; font-weight: 600; color: var(--text-muted); margin: 16px 0 6px; }
+        .text-input, .text-area {
+          width: 100%; font-family: var(--font-body); padding: 12px 14px; border-radius: 12px; border: 1.5px solid var(--accent-soft);
+          background: var(--card); color: var(--text); font-size: 0.92rem; outline: none; margin-bottom: 4px;
+        }
+        .text-input:focus, .text-area:focus { border-color: var(--accent); }
+        .text-area { resize: vertical; font-family: var(--font-display); font-size: 1.05rem; line-height: 1.6; }
+        .loc-editor { background: var(--card); border-radius: 14px; padding: 14px; margin-bottom: 14px; }
+        .loc-editor-row { display: flex; gap: 8px; align-items: center; }
+        .loc-editor-row .text-input { margin-bottom: 8px; }
+        .icon-x { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.9rem; }
+        .loc-toggles { display: flex; gap: 16px; margin-top: 6px; flex-wrap: wrap; }
+        .toggle-label { font-size: 0.8rem; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
+        .toggle-label.block { display: flex; }
+        .theme-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }
+        .theme-swatch {
+          position: relative; border-radius: 14px; border: 2px solid transparent; padding: 14px;
+          font-family: var(--font-body); font-weight: 600; font-size: 0.85rem; cursor: pointer; text-align: left;
+          transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+        }
+        .theme-swatch:hover { transform: translateY(-2px); }
+        .theme-swatch.selected { box-shadow: 0 8px 20px -8px rgba(0,0,0,0.35); transform: translateY(-2px) scale(1.02); }
+        .theme-check {
+          position: absolute; top: 8px; right: 10px; width: 20px; height: 20px; border-radius: 50%;
+          display: flex; align-items: center; justify-content: center;
+          font-size: 0.68rem; color: #fff; animation: popIn 0.25s ease;
+        }
+        .preview-frame { border-radius: 20px; overflow: hidden; box-shadow: 0 6px 20px -8px rgba(0,0,0,0.2); }
+        .preview-inner { padding: 26px; }
+        .create-nav { margin-top: 10px; }
+        .generated-block { text-align: center; }
+
+        .link-box { display: flex; gap: 8px; margin: 20px 0; }
+        .link-box input { flex: 1; padding: 12px 14px; border-radius: 12px; border: 1.5px solid var(--accent-soft); background: var(--bg-alt); color: var(--text); font-size: 0.85rem; }
+
+        @media (max-width: 480px) {
+          .card-grid { grid-template-columns: 1fr; }
+          .hero-title { font-size: 2.1rem; }
+          .stage-title { font-size: 1.7rem; }
+          .theme-grid { grid-template-columns: 1fr; }
+        }
+      `}</style>
+
+      {mode === "landing" && (
+        <Landing
+          onOpen={() => setMode("recipient")}
+          onGoCreate={() => setMode("create")}
+          onLoadById={loadById}
+        />
+      )}
+
+      {mode === "recipient" && (
+        <RecipientFlow invitation={invitation} onBackToLanding={() => setMode("landing")} />
+      )}
+
+      {mode === "create" && (
+        <CreateFlow
+          onCancel={() => setMode("landing")}
+          onGenerated={(inv) => { setCreatedInvitation(inv); setMode("created"); }}
+        />
+      )}
+
+      {mode === "created" && createdInvitation && (
+        <div className={`create-flow theme-${createdInvitation.theme}`}>
+          <div className="generated-block fade-in" style={{ paddingTop: 60 }}>
+            <p className="eyebrow">All set</p>
+            <h2 className="stage-title">Your invitation<br />is ready 💌</h2>
+            <p className="stage-body" style={{ margin: "0 auto 20px" }}>
+              Share this code with {createdInvitation.recipientName}. Opening it plays out exactly what you designed.
+            </p>
+            <div className="link-box">
+              <input readOnly value={createdInvitation.id} />
+              <SealButton
+                onClick={async () => {
+                  try { await navigator.clipboard.writeText(createdInvitation.id); } catch (e) {}
+                  setLinkCopied(true);
+                  setTimeout(() => setLinkCopied(false), 2000);
+                }}
+              >
+                {linkCopied ? "Copied ✓" : "Copy Code"}
+              </SealButton>
+            </div>
+            <div className="hello-buttons" style={{ justifyContent: "center" }}>
+              <SealButton
+                variant="ghost"
+                onClick={() => { setInvitation(createdInvitation); setMode("recipient"); }}
+              >
+                Preview as {createdInvitation.recipientName} →
+              </SealButton>
+              <SealButton variant="ghost" onClick={() => setMode("landing")}>Back to start</SealButton>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {loadingId && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.15)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 99 }}>
+          <div style={{ background: theme.card, padding: "16px 24px", borderRadius: 14, fontFamily: theme.bodyFont }}>Opening your invitation…</div>
+        </div>
+      )}
+    </div>
+  );
+}
