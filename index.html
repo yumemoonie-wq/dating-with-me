@@ -353,7 +353,7 @@ function StartScreen({ onGoCreate, onLoadById, onCheckStatus }) {
             <input
               value={idInput}
               onChange={(e) => { setIdInput(e.target.value); setIdError(""); }}
-              placeholder="Enter your invitation code"
+              placeholder="Paste your invitation link or code"
             />
             <button
               className="link-btn"
@@ -985,6 +985,35 @@ function decodeInvitationCode(code) {
   return data;
 }
 
+// Builds a real, clickable link that carries the invitation in its hash —
+// opening it loads the invitation directly, no manual code entry needed.
+function buildShareLink(shareCode) {
+  if (typeof window === "undefined") return "";
+  return `${window.location.origin}${window.location.pathname}#i=${shareCode}`;
+}
+
+// Accepts either a raw code or a pasted full link and returns just the code.
+function extractCodeFromInput(input) {
+  const trimmed = (input || "").trim();
+  const match = trimmed.match(/[#&?]i=([^&\s]+)/);
+  return match ? decodeURIComponent(match[1]) : trimmed;
+}
+
+// Read once at page load: if the URL carries an invitation (from someone's
+// shared link), we should skip the start screen entirely and go straight in.
+function getInvitationFromCurrentUrl() {
+  if (typeof window === "undefined") return null;
+  try {
+    const code = extractCodeFromInput(window.location.hash || window.location.search || "");
+    if (!code) return null;
+    return decodeInvitationCode(code);
+  } catch (e) {
+    return null;
+  }
+}
+
+const linkedInvitation = getInvitationFromCurrentUrl();
+
 function TimeEditor({ dateStr, times, onAdd, onRemove }) {
   const [draft, setDraft] = useState("");
   const label = new Date(dateStr + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
@@ -1357,8 +1386,10 @@ function GeneratedLink({ saving, onGenerated }) {
 /* ---------------------------- APP SHELL ---------------------------- */
 
 function App() {
-  const [mode, setMode] = useState("start"); // start | opening | recipient | create | created
-  const [invitation, setInvitation] = useState(sampleInvitation);
+  const [mode, setMode] = useState(
+    linkedInvitation ? (linkedInvitation.response && linkedInvitation.response.confirmedAt ? "response" : "opening") : "start"
+  );
+  const [invitation, setInvitation] = useState(linkedInvitation || sampleInvitation);
   const [createdInvitation, setCreatedInvitation] = useState(null);
   const [linkCopied, setLinkCopied] = useState(false);
   const [loadingId, setLoadingId] = useState(false);
@@ -1372,8 +1403,26 @@ function App() {
     storage.set(`invite:${sampleInvitation.id}`, JSON.stringify(sampleInvitation), true).catch(() => {});
   }, []);
 
-  const loadById = async (rawCode) => {
+  useEffect(() => {
+    // If we arrived via a shared link, best-effort check for a fresher
+    // saved copy (e.g. this browser already recorded a response).
+    if (!linkedInvitation) return;
+    (async () => {
+      try {
+        const res = await storage.get(`invite:${linkedInvitation.id}`, true);
+        if (!res) return;
+        const stored = JSON.parse(res.value);
+        if (stored.response && stored.response.confirmedAt) {
+          setInvitation(stored);
+          setMode("response");
+        }
+      } catch (e) { /* no local copy — the link's own data is already showing */ }
+    })();
+  }, []);
+
+  const loadById = async (input) => {
     setLoadingId(true);
+    const rawCode = extractCodeFromInput(input);
 
     // Try decoding as a self-contained code first — this works everywhere,
     // regardless of device/browser, since no lookup is involved.
@@ -1745,6 +1794,13 @@ function App() {
           background: var(--bg-alt); color: var(--text); font-size: 0.72rem; font-family: 'SFMono-Regular', Menlo, monospace;
           overflow-x: auto; white-space: nowrap;
         }
+        .code-fallback { margin: -6px 0 14px; text-align: left; }
+        .code-fallback summary {
+          cursor: pointer; font-size: 0.78rem; color: var(--text-muted); text-decoration: underline;
+          text-underline-offset: 3px; list-style: none;
+        }
+        .code-fallback summary::-webkit-details-marker { display: none; }
+        .code-fallback .link-box { margin: 10px 0 0; }
 
         @media (max-width: 480px) {
           .card-grid { grid-template-columns: 1fr; }
@@ -1803,22 +1859,36 @@ function App() {
             <p className="eyebrow">All set</p>
             <h2 className="stage-title">Your invitation<br />is ready 💌</h2>
             <p className="stage-body" style={{ margin: "0 auto 20px" }}>
-              Share this code with {createdInvitation.recipientName}. Opening it plays out exactly what you designed.
+              Send this link to {createdInvitation.recipientName} — opening it takes them straight in, no code to paste.
             </p>
             <div className="link-box">
-              <input readOnly value={createdInvitation.shareCode} onFocus={(e) => e.target.select()} />
+              <input readOnly value={buildShareLink(createdInvitation.shareCode)} onFocus={(e) => e.target.select()} />
               <SealButton
                 onClick={async () => {
-                  try { await navigator.clipboard.writeText(createdInvitation.shareCode); } catch (e) {}
+                  try { await navigator.clipboard.writeText(buildShareLink(createdInvitation.shareCode)); } catch (e) {}
                   setLinkCopied(true);
                   setTimeout(() => setLinkCopied(false), 2000);
                 }}
               >
-                {linkCopied ? "Copied ✓" : "Copy Code"}
+                {linkCopied ? "Copied ✓" : "Copy Link"}
               </SealButton>
             </div>
+            <details className="code-fallback">
+              <summary>Prefer to share just a code instead?</summary>
+              <div className="link-box">
+                <input readOnly value={createdInvitation.shareCode} onFocus={(e) => e.target.select()} />
+                <SealButton
+                  variant="ghost"
+                  onClick={async () => {
+                    try { await navigator.clipboard.writeText(createdInvitation.shareCode); } catch (e) {}
+                  }}
+                >
+                  Copy
+                </SealButton>
+              </div>
+            </details>
             <p className="stage-body" style={{ margin: "0 auto 16px", fontSize: "0.8rem" }}>
-              This code carries the whole invitation, so it'll open correctly on any device. It's also saved under "Invitations you've sent" on this device's start screen.
+              This link carries the whole invitation, so it opens correctly on any device. It's also saved under "Invitations you've sent" on this device's start screen.
             </p>
             <div className="hello-buttons" style={{ justifyContent: "center" }}>
               <SealButton
