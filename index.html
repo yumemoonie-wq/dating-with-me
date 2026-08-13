@@ -7,6 +7,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js"></script>
 <style>
   html, body { margin: 0; padding: 0; }
   #root { min-height: 100vh; }
@@ -264,12 +265,14 @@ function SealButton({ children, onClick, variant = "primary", disabled, style })
 /* Shown by default. No envelope here — that's reserved for when someone
    actually opens a link/code sent to them. */
 
-function StartScreen({ onGoCreate, onLoadById, onCheckStatus }) {
+function StartScreen({ onGoCreate, onLoadById, onCheckStatus, onImportReply }) {
   const [idInput, setIdInput] = useState("");
   const [idError, setIdError] = useState("");
   const [checking, setChecking] = useState(false);
   const [myInvitations, setMyInvitations] = useState(null); // null = loading, [] = none yet
   const [checkingId, setCheckingId] = useState(null);
+  const [replyInput, setReplyInput] = useState("");
+  const [replyError, setReplyError] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -369,6 +372,26 @@ function StartScreen({ onGoCreate, onLoadById, onCheckStatus }) {
             </button>
           </div>
           {idError && <p className="id-error">{idError}</p>}
+
+          <p className="start-divider" style={{ marginTop: 18 }}>got a reply back from someone?</p>
+          <div className="id-loader">
+            <input
+              value={replyInput}
+              onChange={(e) => { setReplyInput(e.target.value); setReplyError(""); }}
+              placeholder="Paste their reply code or message"
+            />
+            <button
+              className="link-btn"
+              onClick={() => {
+                if (!replyInput.trim()) return;
+                const ok = onImportReply(replyInput);
+                if (!ok) setReplyError("Couldn't read that reply code.");
+              }}
+            >
+              Import →
+            </button>
+          </div>
+          {replyError && <p className="id-error">{replyError}</p>}
         </div>
       </div>
     </div>
@@ -459,21 +482,18 @@ function WaitingView({ invitation, onRefresh, onBack, refreshing }) {
 
 /* ---------------------------- RESPONSE VIEW (for the sender) ---------------------------- */
 
-function ResponseView({ invitation, onBack }) {
-  const r = invitation.response;
-  const activity = invitation.activities.find((a) => a.id === r.activity);
-  const location = invitation.locations.find((l) => l.id === r.location);
+function ResponseView({ senderName, recipientName, date, time, activityEmoji, activityTitle, locationName, onBack }) {
   return (
     <div className="landing">
       <div className="landing-copy">
-        <p className="eyebrow">For {invitation.senderName}</p>
-        <h1 className="hero-title">{invitation.recipientName} said yes! 🎉</h1>
+        <p className="eyebrow">For {senderName}</p>
+        <h1 className="hero-title">{recipientName} said yes! 🎉</h1>
         <p className="hero-sub">Here's what they picked.</p>
         <div className="summary-card" style={{ textAlign: "left", margin: "0 auto 24px" }}>
-          <div className="summary-row"><span className="summary-label">Date</span><span>{monthLabel(r.date)}</span></div>
-          <div className="summary-row"><span className="summary-label">Time</span><span>{r.time}</span></div>
-          <div className="summary-row"><span className="summary-label">Activity</span><span>{activity?.emoji} {activity?.title}</span></div>
-          <div className="summary-row"><span className="summary-label">Place</span><span>{location?.name}</span></div>
+          <div className="summary-row"><span className="summary-label">Date</span><span>{monthLabel(date)}</span></div>
+          <div className="summary-row"><span className="summary-label">Time</span><span>{time}</span></div>
+          <div className="summary-row"><span className="summary-label">Activity</span><span>{activityEmoji} {activityTitle}</span></div>
+          <div className="summary-row"><span className="summary-label">Place</span><span>{locationName}</span></div>
         </div>
         <SealButton onClick={onBack}>Back to start</SealButton>
       </div>
@@ -747,8 +767,10 @@ function SummaryStep({ invitation, selection, onConfirm }) {
 
 function ConfirmedScreen({ invitation, selection, saveState }) {
   const [copied, setCopied] = useState(false);
+  const [replyCopied, setReplyCopied] = useState(false);
   const activity = invitation.activities.find((a) => a.id === selection.activity);
   const location = invitation.locations.find((l) => l.id === selection.location);
+  const [confirmedAt] = useState(() => new Date().toISOString());
   const [showHearts, setShowHearts] = useState(true);
   useEffect(() => {
     const t = setTimeout(() => setShowHearts(false), 3200);
@@ -797,6 +819,25 @@ function ConfirmedScreen({ invitation, selection, saveState }) {
     } catch (e) { /* user cancelled share, ignore */ }
   };
 
+  const replyMessage = () => {
+    const code = encodeResponseCode(invitation, selection, confirmedAt);
+    return `${shareText()}\n\n(reply code — paste this into "A Date for You": ${code})`;
+  };
+
+  const handleCopyReply = async () => {
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: "My reply", text: replyMessage() });
+        return;
+      }
+    } catch (e) { /* fall through to clipboard */ }
+    try {
+      await navigator.clipboard.writeText(replyMessage());
+      setReplyCopied(true);
+      setTimeout(() => setReplyCopied(false), 2500);
+    } catch (e) { /* clipboard unavailable */ }
+  };
+
   return (
     <div className="stage fade-in confirmed-stage">
       <FloatingHearts show={showHearts} />
@@ -805,8 +846,8 @@ function ConfirmedScreen({ invitation, selection, saveState }) {
 
       <p className="save-status">
         {saveState === "saving" && "Letting them know…"}
-        {saveState === "saved" && `✓ ${invitation.senderName} will see this the next time they check.`}
-        {saveState === "error" && "Couldn't send this back automatically — you may want to tell them directly."}
+        {saveState === "saved" && `Saved on this device. If ${invitation.senderName} is checking from somewhere else, send them your reply below so they see it too.`}
+        {saveState === "error" && "Couldn't save automatically — send them your reply below so they know."}
       </p>
 
       <div className="summary-card">
@@ -830,6 +871,16 @@ function ConfirmedScreen({ invitation, selection, saveState }) {
       <div className="hello-buttons">
         <a className="seal-btn primary" href={gcalLink()} target="_blank" rel="noopener noreferrer">Add to Calendar</a>
         <SealButton variant="ghost" onClick={handleShare}>{copied ? "Copied ✓" : "Share Details"}</SealButton>
+      </div>
+
+      <div className="reply-back-block">
+        <p className="reply-back-title">Make sure {invitation.senderName} actually sees this</p>
+        <p className="reply-back-body">
+          There's no server behind this, so your reply is only saved on your own device. Send it back yourself to be sure.
+        </p>
+        <SealButton onClick={handleCopyReply}>
+          {replyCopied ? "Copied ✓" : `Copy reply for ${invitation.senderName}`}
+        </SealButton>
       </div>
     </div>
   );
@@ -955,34 +1006,146 @@ function uid() {
 // code so opening an invitation works on ANY device without needing shared
 // server storage — important once this is deployed outside Claude, where
 // window.storage isn't available and localStorage is per-browser only.
+//
+// To keep the resulting link short: activities are sent as bare ids (and
+// re-expanded from the shared ALL_ACTIVITIES list on decode, instead of
+// repeating their title/description text every time), keys are shortened,
+// and the whole thing is compressed with LZ-string when available.
 function encodeInvitationCode(inv) {
   const payload = {
-    id: inv.id,
-    senderName: inv.senderName,
-    recipientName: inv.recipientName,
-    theme: inv.theme,
-    intro: inv.intro,
-    activities: inv.activities,
-    locations: inv.locations,
-    availableDates: inv.availableDates,
-    timeSlots: inv.timeSlots,
-    note: inv.note,
-    photo: inv.photo,
-    countdownEnabled: inv.countdownEnabled,
-    createdAt: inv.createdAt,
+    i: inv.id,
+    sn: inv.senderName,
+    rn: inv.recipientName,
+    th: inv.theme,
+    in: inv.intro,
+    ac: (inv.activities || []).map((a) => a.id),
+    lo: (inv.locations || []).map((l) => ({
+      n: l.name,
+      d: l.desc,
+      a: l.address || "",
+      r: l.recommended ? 1 : 0,
+      s: l.secret ? 1 : 0,
+      e: l.emoji || "📍",
+      fa: l.forActivities || [],
+    })),
+    ad: inv.availableDates || [],
+    ts: inv.timeSlots || {},
+    no: inv.note,
+    ph: inv.photo || null,
+    cd: inv.countdownEnabled ? 1 : 0,
+    ca: inv.createdAt,
   };
   const json = JSON.stringify(payload);
+  if (typeof window !== "undefined" && window.LZString) {
+    return "z" + window.LZString.compressToEncodedURIComponent(json);
+  }
   const base64 = btoa(unescape(encodeURIComponent(json)));
-  return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return "b" + base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 function decodeInvitationCode(code) {
-  let base64 = code.trim().replace(/-/g, "+").replace(/_/g, "/");
-  while (base64.length % 4) base64 += "=";
-  const json = decodeURIComponent(escape(atob(base64)));
-  const data = JSON.parse(json);
-  if (!data || !data.recipientName || !Array.isArray(data.activities)) throw new Error("not a valid invitation code");
-  return data;
+  const trimmed = (code || "").trim();
+  const prefix = trimmed[0];
+  const rest = trimmed.slice(1);
+  let json;
+  if (prefix === "z") {
+    if (typeof window === "undefined" || !window.LZString) throw new Error("compression unavailable");
+    json = window.LZString.decompressFromEncodedURIComponent(rest);
+    if (!json) throw new Error("could not decompress code");
+  } else if (prefix === "b") {
+    let base64 = rest.replace(/-/g, "+").replace(/_/g, "/");
+    while (base64.length % 4) base64 += "=";
+    json = decodeURIComponent(escape(atob(base64)));
+  } else {
+    // Legacy codes generated before compression was added had no prefix.
+    let base64 = trimmed.replace(/-/g, "+").replace(/_/g, "/");
+    while (base64.length % 4) base64 += "=";
+    json = decodeURIComponent(escape(atob(base64)));
+  }
+  const p = JSON.parse(json);
+  if (!p || !p.rn) throw new Error("not a valid invitation code");
+  return {
+    id: p.i,
+    senderName: p.sn,
+    recipientName: p.rn,
+    theme: p.th,
+    intro: p.in,
+    activities: ALL_ACTIVITIES.filter((a) => (p.ac || []).includes(a.id)),
+    locations: (p.lo || []).map((l, idx) => ({
+      id: `loc-${idx}`,
+      name: l.n,
+      desc: l.d,
+      address: l.a,
+      recommended: !!l.r,
+      secret: !!l.s,
+      emoji: l.e || "📍",
+      forActivities: l.fa || [],
+    })),
+    availableDates: p.ad || [],
+    timeSlots: p.ts || {},
+    note: p.no,
+    photo: p.ph || null,
+    countdownEnabled: !!p.cd,
+    createdAt: p.ca,
+  };
+}
+
+// A reply code carries a recipient's response back to the sender in the
+// same self-contained way — it doesn't reference the original invitation
+// data at all, so it can be read on any device without shared storage.
+// This is how a reply actually reaches the sender when they're on a
+// different browser/device than the one that created the invitation,
+// since localStorage can't sync between them on its own.
+function encodeResponseCode(invitation, selection, confirmedAt) {
+  const activity = invitation.activities.find((a) => a.id === selection.activity);
+  const location = invitation.locations.find((l) => l.id === selection.location);
+  const payload = {
+    i: invitation.id,
+    rn: invitation.recipientName,
+    sn: invitation.senderName,
+    ae: activity ? activity.emoji : "",
+    at: activity ? activity.title : "",
+    ln: location ? (location.secret ? "A secret spot 🤫" : location.name) : "",
+    d: selection.date,
+    t: selection.time,
+    ca: confirmedAt,
+  };
+  const json = JSON.stringify(payload);
+  if (typeof window !== "undefined" && window.LZString) {
+    return "rz" + window.LZString.compressToEncodedURIComponent(json);
+  }
+  const base64 = btoa(unescape(encodeURIComponent(json)));
+  return "rb" + base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function decodeResponseCode(code) {
+  const trimmed = (code || "").trim();
+  if (trimmed[0] !== "r") throw new Error("not a reply code");
+  const kind = trimmed[1];
+  const rest = trimmed.slice(2);
+  let json;
+  if (kind === "z") {
+    if (typeof window === "undefined" || !window.LZString) throw new Error("compression unavailable");
+    json = window.LZString.decompressFromEncodedURIComponent(rest);
+    if (!json) throw new Error("could not decompress reply code");
+  } else if (kind === "b") {
+    let base64 = rest.replace(/-/g, "+").replace(/_/g, "/");
+    while (base64.length % 4) base64 += "=";
+    json = decodeURIComponent(escape(atob(base64)));
+  } else {
+    throw new Error("not a reply code");
+  }
+  const p = JSON.parse(json);
+  if (!p || !p.d || !p.t) throw new Error("invalid reply code");
+  return p;
+}
+
+// Pulls a "rz…"/"rb…" reply code out of a longer pasted message, in case
+// someone pastes the whole text they were sent rather than just the code.
+function extractReplyCodeFromInput(input) {
+  const trimmed = (input || "").trim();
+  const match = trimmed.match(/\br[bz][A-Za-z0-9_-]+/);
+  return match ? match[0] : trimmed;
 }
 
 // Builds a real, clickable link that carries the invitation in its hash —
@@ -1395,6 +1558,19 @@ function App() {
   const [loadingId, setLoadingId] = useState(false);
   const [checkingReply, setCheckingReply] = useState(false);
   const [replyStatus, setReplyStatus] = useState("");
+  const [importedReply, setImportedReply] = useState(null);
+
+  const importReply = (rawInput) => {
+    try {
+      const code = extractReplyCodeFromInput(rawInput);
+      const data = decodeResponseCode(code);
+      setImportedReply(data);
+      setMode("importedReply");
+      return true;
+    } catch (e) {
+      return false;
+    }
+  };
 
   const theme = THEMES[invitation.theme] || THEMES["soft-romantic"];
 
@@ -1703,6 +1879,9 @@ function App() {
         .countdown-label { font-size: 0.8rem; color: var(--text-muted); margin: 0 0 4px; }
         .countdown-value { font-family: var(--font-display); font-size: 1.8rem; color: var(--accent); margin: 0; }
         .save-status { font-size: 0.8rem; color: var(--text-muted); margin: -8px 0 20px; }
+        .reply-back-block { background: var(--card); border-radius: 16px; padding: 18px 20px; margin-top: 22px; text-align: left; }
+        .reply-back-title { font-weight: 600; font-size: 0.9rem; margin: 0 0 6px; }
+        .reply-back-body { font-size: 0.8rem; color: var(--text-muted); margin: 0 0 14px; line-height: 1.5; }
 
         .hello-buttons { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 6px; align-items: center; }
 
@@ -1815,6 +1994,7 @@ function App() {
           onGoCreate={() => setMode("create")}
           onLoadById={loadById}
           onCheckStatus={checkStatus}
+          onImportReply={importReply}
         />
       )}
 
@@ -1825,8 +2005,30 @@ function App() {
         />
       )}
 
-      {mode === "response" && (
-        <ResponseView invitation={invitation} onBack={() => setMode("start")} />
+      {mode === "response" && invitation.response && (
+        <ResponseView
+          senderName={invitation.senderName}
+          recipientName={invitation.recipientName}
+          date={invitation.response.date}
+          time={invitation.response.time}
+          activityEmoji={invitation.activities.find((a) => a.id === invitation.response.activity)?.emoji}
+          activityTitle={invitation.activities.find((a) => a.id === invitation.response.activity)?.title}
+          locationName={invitation.locations.find((l) => l.id === invitation.response.location)?.name}
+          onBack={() => setMode("start")}
+        />
+      )}
+
+      {mode === "importedReply" && importedReply && (
+        <ResponseView
+          senderName={importedReply.sn}
+          recipientName={importedReply.rn}
+          date={importedReply.d}
+          time={importedReply.t}
+          activityEmoji={importedReply.ae}
+          activityTitle={importedReply.at}
+          locationName={importedReply.ln}
+          onBack={() => setMode("start")}
+        />
       )}
 
       {mode === "waiting" && (
