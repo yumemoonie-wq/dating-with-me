@@ -265,14 +265,11 @@ function SealButton({ children, onClick, variant = "primary", disabled, style })
 /* Shown by default. No envelope here — that's reserved for when someone
    actually opens a link/code sent to them. */
 
-function StartScreen({ onGoCreate, onLoadById, onCheckStatus, onImportReply }) {
+function StartScreen({ onGoCreate, onLoadById }) {
   const [idInput, setIdInput] = useState("");
   const [idError, setIdError] = useState("");
   const [checking, setChecking] = useState(false);
   const [myInvitations, setMyInvitations] = useState(null); // null = loading, [] = none yet
-  const [checkingId, setCheckingId] = useState(null);
-  const [replyInput, setReplyInput] = useState("");
-  const [replyError, setReplyError] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -322,29 +319,17 @@ function StartScreen({ onGoCreate, onLoadById, onCheckStatus, onImportReply }) {
             {myInvitations.map((inv) => (
               <div className="my-invite-row" key={inv.id}>
                 <span className="my-invite-name">{inv.recipientName}</span>
-                <div className="my-invite-actions">
-                  <button
-                    className="link-btn"
-                    onClick={async () => {
-                      setCheckingId(inv.id);
-                      await onCheckStatus(inv.id);
-                      setCheckingId(null);
-                    }}
-                  >
-                    {checkingId === inv.id ? "Checking…" : "Check status →"}
-                  </button>
-                  <button
-                    className="icon-x"
-                    aria-label={`Remove ${inv.recipientName}`}
-                    onClick={async () => {
-                      const updated = myInvitations.filter((i) => i.id !== inv.id);
-                      setMyInvitations(updated);
-                      try { await storage.set("my-invitations", JSON.stringify(updated), false); } catch (e) {}
-                    }}
-                  >
-                    ✕
-                  </button>
-                </div>
+                <button
+                  className="icon-x"
+                  aria-label={`Remove ${inv.recipientName}`}
+                  onClick={async () => {
+                    const updated = myInvitations.filter((i) => i.id !== inv.id);
+                    setMyInvitations(updated);
+                    try { await storage.set("my-invitations", JSON.stringify(updated), false); } catch (e) {}
+                  }}
+                >
+                  ✕
+                </button>
               </div>
             ))}
           </div>
@@ -372,26 +357,6 @@ function StartScreen({ onGoCreate, onLoadById, onCheckStatus, onImportReply }) {
             </button>
           </div>
           {idError && <p className="id-error">{idError}</p>}
-
-          <p className="start-divider" style={{ marginTop: 18 }}>got a reply back from someone?</p>
-          <div className="id-loader">
-            <input
-              value={replyInput}
-              onChange={(e) => { setReplyInput(e.target.value); setReplyError(""); }}
-              placeholder="Paste their reply code or message"
-            />
-            <button
-              className="link-btn"
-              onClick={() => {
-                if (!replyInput.trim()) return;
-                const ok = onImportReply(replyInput);
-                if (!ok) setReplyError("Couldn't read that reply code.");
-              }}
-            >
-              Import →
-            </button>
-          </div>
-          {replyError && <p className="id-error">{replyError}</p>}
         </div>
       </div>
     </div>
@@ -444,37 +409,6 @@ function EnvelopeOpen({ invitation, onOpen }) {
         <SealButton onClick={handleOpen} disabled={opening}>
           {opening ? "Opening…" : "Open the Invitation"}
         </SealButton>
-      </div>
-    </div>
-  );
-}
-
-/* ---------------------------- WAITING VIEW (for the sender, no reply yet) ---------------------------- */
-
-function WaitingView({ invitation, onRefresh, onBack, refreshing }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <div className="landing">
-      <div className="landing-copy">
-        <p className="eyebrow">Sent</p>
-        <h1 className="hero-title">Still waiting on<br />{invitation.recipientName}.</h1>
-        <p className="hero-sub">No reply yet — nothing to do but check back.</p>
-        <div className="link-box">
-          <input readOnly value={invitation.id} />
-          <SealButton
-            onClick={async () => {
-              try { await navigator.clipboard.writeText(invitation.id); } catch (e) {}
-              setCopied(true);
-              setTimeout(() => setCopied(false), 2000);
-            }}
-          >
-            {copied ? "Copied ✓" : "Copy Code"}
-          </SealButton>
-        </div>
-        <div className="hello-buttons" style={{ justifyContent: "center" }}>
-          <SealButton onClick={onRefresh} disabled={refreshing}>{refreshing ? "Checking…" : "Check again"}</SealButton>
-          <SealButton variant="ghost" onClick={onBack}>Back to start</SealButton>
-        </div>
       </div>
     </div>
   );
@@ -767,10 +701,8 @@ function SummaryStep({ invitation, selection, onConfirm }) {
 
 function ConfirmedScreen({ invitation, selection, saveState }) {
   const [copied, setCopied] = useState(false);
-  const [replyCopied, setReplyCopied] = useState(false);
   const activity = invitation.activities.find((a) => a.id === selection.activity);
   const location = invitation.locations.find((l) => l.id === selection.location);
-  const [confirmedAt] = useState(() => new Date().toISOString());
   const [showHearts, setShowHearts] = useState(true);
   useEffect(() => {
     const t = setTimeout(() => setShowHearts(false), 3200);
@@ -819,36 +751,11 @@ function ConfirmedScreen({ invitation, selection, saveState }) {
     } catch (e) { /* user cancelled share, ignore */ }
   };
 
-  const replyMessage = () => {
-    const code = encodeResponseCode(invitation, selection, confirmedAt);
-    return `${shareText()}\n\n(reply code — paste this into "A Date for You": ${code})`;
-  };
-
-  const handleCopyReply = async () => {
-    try {
-      if (navigator.share) {
-        await navigator.share({ title: "My reply", text: replyMessage() });
-        return;
-      }
-    } catch (e) { /* fall through to clipboard */ }
-    try {
-      await navigator.clipboard.writeText(replyMessage());
-      setReplyCopied(true);
-      setTimeout(() => setReplyCopied(false), 2500);
-    } catch (e) { /* clipboard unavailable */ }
-  };
-
   return (
     <div className="stage fade-in confirmed-stage">
       <FloatingHearts show={showHearts} />
       <p className="eyebrow">Confirmed</p>
       <h2 className="stage-title">It's officially<br />a date. 💌</h2>
-
-      <p className="save-status">
-        {saveState === "saving" && "Letting them know…"}
-        {saveState === "saved" && `Saved on this device. If ${invitation.senderName} is checking from somewhere else, send them your reply below so they see it too.`}
-        {saveState === "error" && "Couldn't save automatically — send them your reply below so they know."}
-      </p>
 
       <div className="summary-card">
         <div className="summary-row"><span className="summary-label">Date</span><span>{monthLabel(selection.date)}</span></div>
@@ -873,15 +780,7 @@ function ConfirmedScreen({ invitation, selection, saveState }) {
         <SealButton variant="ghost" onClick={handleShare}>{copied ? "Copied ✓" : "Share Details"}</SealButton>
       </div>
 
-      <div className="reply-back-block">
-        <p className="reply-back-title">Make sure {invitation.senderName} actually sees this</p>
-        <p className="reply-back-body">
-          There's no server behind this, so your reply is only saved on your own device. Send it back yourself to be sure.
-        </p>
-        <SealButton onClick={handleCopyReply}>
-          {replyCopied ? "Copied ✓" : `Copy reply for ${invitation.senderName}`}
-        </SealButton>
-      </div>
+      <p className="screenshot-hint">📸 Screenshot this and send it to {invitation.senderName} so they know!</p>
     </div>
   );
 }
@@ -1088,64 +987,6 @@ function decodeInvitationCode(code) {
     countdownEnabled: !!p.cd,
     createdAt: p.ca,
   };
-}
-
-// A reply code carries a recipient's response back to the sender in the
-// same self-contained way — it doesn't reference the original invitation
-// data at all, so it can be read on any device without shared storage.
-// This is how a reply actually reaches the sender when they're on a
-// different browser/device than the one that created the invitation,
-// since localStorage can't sync between them on its own.
-function encodeResponseCode(invitation, selection, confirmedAt) {
-  const activity = invitation.activities.find((a) => a.id === selection.activity);
-  const location = invitation.locations.find((l) => l.id === selection.location);
-  const payload = {
-    i: invitation.id,
-    rn: invitation.recipientName,
-    sn: invitation.senderName,
-    ae: activity ? activity.emoji : "",
-    at: activity ? activity.title : "",
-    ln: location ? (location.secret ? "A secret spot 🤫" : location.name) : "",
-    d: selection.date,
-    t: selection.time,
-    ca: confirmedAt,
-  };
-  const json = JSON.stringify(payload);
-  if (typeof window !== "undefined" && window.LZString) {
-    return "rz" + window.LZString.compressToEncodedURIComponent(json);
-  }
-  const base64 = btoa(unescape(encodeURIComponent(json)));
-  return "rb" + base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-function decodeResponseCode(code) {
-  const trimmed = (code || "").trim();
-  if (trimmed[0] !== "r") throw new Error("not a reply code");
-  const kind = trimmed[1];
-  const rest = trimmed.slice(2);
-  let json;
-  if (kind === "z") {
-    if (typeof window === "undefined" || !window.LZString) throw new Error("compression unavailable");
-    json = window.LZString.decompressFromEncodedURIComponent(rest);
-    if (!json) throw new Error("could not decompress reply code");
-  } else if (kind === "b") {
-    let base64 = rest.replace(/-/g, "+").replace(/_/g, "/");
-    while (base64.length % 4) base64 += "=";
-    json = decodeURIComponent(escape(atob(base64)));
-  } else {
-    throw new Error("not a reply code");
-  }
-  const p = JSON.parse(json);
-  if (!p || !p.d || !p.t) throw new Error("invalid reply code");
-  return p;
-}
-
-// Pulls a "rz…"/"rb…" reply code out of a longer pasted message, in case
-// someone pastes the whole text they were sent rather than just the code.
-function extractReplyCodeFromInput(input) {
-  const trimmed = (input || "").trim();
-  const match = trimmed.match(/\br[bz][A-Za-z0-9_-]+/);
-  return match ? match[0] : trimmed;
 }
 
 // Builds a real, clickable link that carries the invitation in its hash —
@@ -1556,21 +1397,6 @@ function App() {
   const [createdInvitation, setCreatedInvitation] = useState(null);
   const [linkCopied, setLinkCopied] = useState(false);
   const [loadingId, setLoadingId] = useState(false);
-  const [checkingReply, setCheckingReply] = useState(false);
-  const [replyStatus, setReplyStatus] = useState("");
-  const [importedReply, setImportedReply] = useState(null);
-
-  const importReply = (rawInput) => {
-    try {
-      const code = extractReplyCodeFromInput(rawInput);
-      const data = decodeResponseCode(code);
-      setImportedReply(data);
-      setMode("importedReply");
-      return true;
-    } catch (e) {
-      return false;
-    }
-  };
 
   const theme = THEMES[invitation.theme] || THEMES["soft-romantic"];
 
@@ -1633,21 +1459,6 @@ function App() {
       return true;
     } catch (e) {
       setLoadingId(false);
-      return false;
-    }
-  };
-
-  // Used by senders checking on an invitation they sent — never shows the
-  // envelope, only "waiting" or the reply summary.
-  const checkStatus = async (id) => {
-    try {
-      const res = await storage.get(`invite:${id}`, true);
-      if (!res) return false;
-      const data = JSON.parse(res.value);
-      setInvitation(data);
-      setMode(data.response && data.response.confirmedAt ? "response" : "waiting");
-      return true;
-    } catch (e) {
       return false;
     }
   };
@@ -1754,7 +1565,6 @@ function App() {
           border-radius: 12px; padding: 10px 14px; margin-bottom: 8px; font-size: 0.86rem;
         }
         .my-invite-name { font-weight: 600; }
-        .my-invite-actions { display: flex; align-items: center; gap: 10px; }
 
         /* ---------- Buttons ---------- */
         .seal-btn {
@@ -1878,10 +1688,10 @@ function App() {
         .countdown-block { text-align: center; margin-bottom: 26px; }
         .countdown-label { font-size: 0.8rem; color: var(--text-muted); margin: 0 0 4px; }
         .countdown-value { font-family: var(--font-display); font-size: 1.8rem; color: var(--accent); margin: 0; }
-        .save-status { font-size: 0.8rem; color: var(--text-muted); margin: -8px 0 20px; }
-        .reply-back-block { background: var(--card); border-radius: 16px; padding: 18px 20px; margin-top: 22px; text-align: left; }
-        .reply-back-title { font-weight: 600; font-size: 0.9rem; margin: 0 0 6px; }
-        .reply-back-body { font-size: 0.8rem; color: var(--text-muted); margin: 0 0 14px; line-height: 1.5; }
+        .screenshot-hint {
+          text-align: center; font-size: 1rem; font-weight: 600; color: var(--accent);
+          background: var(--accent-soft); border-radius: 14px; padding: 14px 18px; margin: 24px 0 0;
+        }
 
         .hello-buttons { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 6px; align-items: center; }
 
@@ -1993,8 +1803,6 @@ function App() {
         <StartScreen
           onGoCreate={() => setMode("create")}
           onLoadById={loadById}
-          onCheckStatus={checkStatus}
-          onImportReply={importReply}
         />
       )}
 
@@ -2014,32 +1822,6 @@ function App() {
           activityEmoji={invitation.activities.find((a) => a.id === invitation.response.activity)?.emoji}
           activityTitle={invitation.activities.find((a) => a.id === invitation.response.activity)?.title}
           locationName={invitation.locations.find((l) => l.id === invitation.response.location)?.name}
-          onBack={() => setMode("start")}
-        />
-      )}
-
-      {mode === "importedReply" && importedReply && (
-        <ResponseView
-          senderName={importedReply.sn}
-          recipientName={importedReply.rn}
-          date={importedReply.d}
-          time={importedReply.t}
-          activityEmoji={importedReply.ae}
-          activityTitle={importedReply.at}
-          locationName={importedReply.ln}
-          onBack={() => setMode("start")}
-        />
-      )}
-
-      {mode === "waiting" && (
-        <WaitingView
-          invitation={invitation}
-          refreshing={checkingReply}
-          onRefresh={async () => {
-            setCheckingReply(true);
-            await checkStatus(invitation.id);
-            setCheckingReply(false);
-          }}
           onBack={() => setMode("start")}
         />
       )}
@@ -2099,23 +1881,8 @@ function App() {
               >
                 Preview as {createdInvitation.recipientName} →
               </SealButton>
-              <SealButton
-                variant="ghost"
-                onClick={async () => {
-                  setCheckingReply(true);
-                  const ok = await checkStatus(createdInvitation.id);
-                  if (!ok) {
-                    setReplyStatus("No reply saved on this device yet — replies can only be checked from the device/browser that created the invitation.");
-                    setTimeout(() => setReplyStatus(""), 4000);
-                  }
-                  setCheckingReply(false);
-                }}
-              >
-                {checkingReply ? "Checking…" : "Check for a reply"}
-              </SealButton>
               <SealButton variant="ghost" onClick={() => setMode("start")}>Back to start</SealButton>
             </div>
-            {replyStatus && <p className="id-error" style={{ marginTop: 12 }}>{replyStatus}</p>}
           </div>
         </div>
       )}
