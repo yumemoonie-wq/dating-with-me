@@ -334,30 +334,6 @@ function StartScreen({ onGoCreate, onLoadById }) {
             ))}
           </div>
         )}
-
-        <div className="landing-footer">
-          <p className="start-divider">or, if someone sent you one</p>
-          <div className="id-loader">
-            <input
-              value={idInput}
-              onChange={(e) => { setIdInput(e.target.value); setIdError(""); }}
-              placeholder="Paste your invitation link or code"
-            />
-            <button
-              className="link-btn"
-              onClick={async () => {
-                if (!idInput.trim()) return;
-                setChecking(true);
-                const ok = await onLoadById(idInput.trim());
-                setChecking(false);
-                if (!ok) setIdError("Couldn't find that invitation.");
-              }}
-            >
-              {checking ? "Opening…" : "Open →"}
-            </button>
-          </div>
-          {idError && <p className="id-error">{idError}</p>}
-        </div>
       </div>
     </div>
   );
