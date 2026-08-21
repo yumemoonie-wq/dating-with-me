@@ -26,28 +26,6 @@ const { useState, useEffect, useMemo, useRef } = React;
    opened as a standalone .html file so it still works either way.
    ============================================================ */
 
-const storage = (typeof window !== "undefined" && window.storage)
-  ? window.storage
-  : {
-      async get(key) {
-        const raw = localStorage.getItem(key);
-        if (raw === null) throw new Error("not found");
-        return { key, value: raw };
-      },
-      async set(key, value) {
-        localStorage.setItem(key, value);
-        return { key, value };
-      },
-      async delete(key) {
-        localStorage.removeItem(key);
-        return { key, deleted: true };
-      },
-      async list(prefix) {
-        const keys = Object.keys(localStorage).filter((k) => !prefix || k.startsWith(prefix));
-        return { keys, prefix };
-      },
-    };
-
 /* ---------------------------- THEMES ---------------------------- */
 
 const THEMES = {
@@ -58,6 +36,7 @@ const THEMES = {
     card: "#FFFFFF",
     accent: "#8C2F39",
     accentSoft: "#F1D2D6",
+    onAccent: "#FFFFFF",
     text: "#2B1A1D",
     textMuted: "#8A7370",
     displayFont: "'Fraunces', serif",
@@ -70,8 +49,9 @@ const THEMES = {
     bg: "#150F17",
     bgAlt: "#20161F",
     card: "#271B29",
-    accent: "#D98A94",
+    accent: "#C15C6E",
     accentSoft: "#4A2E33",
+    onAccent: "#FFF6F6",
     text: "#F4E9E7",
     textMuted: "#B49B9C",
     displayFont: "'Fraunces', serif",
@@ -86,6 +66,7 @@ const THEMES = {
     card: "#FFFFFF",
     accent: "#3E86A0",
     accentSoft: "#FFE3A3",
+    onAccent: "#FFFFFF",
     text: "#33291A",
     textMuted: "#8E7B54",
     displayFont: "'Fraunces', serif",
@@ -100,6 +81,7 @@ const THEMES = {
     card: "#FBF5E7",
     accent: "#7A2E2E",
     accentSoft: "#E4CBAE",
+    onAccent: "#FFFFFF",
     text: "#3A2B1F",
     textMuted: "#8A7355",
     displayFont: "'Caveat', cursive",
@@ -191,6 +173,12 @@ const monthLabel = (dateStr) =>
     day: "numeric",
   });
 
+const isPastDate = (dateStr) => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return new Date(dateStr + "T00:00:00") < today;
+};
+
 /* ---------------------------- SMALL UI HELPERS ---------------------------- */
 
 function ProgressThread({ steps, activeIndex }) {
@@ -270,6 +258,7 @@ function StartScreen({ onGoCreate, onLoadById }) {
   const [idError, setIdError] = useState("");
   const [checking, setChecking] = useState(false);
   const [myInvitations, setMyInvitations] = useState(null); // null = loading, [] = none yet
+  const [tilt, setTilt] = useState({ x: 0, y: 0 });
 
   useEffect(() => {
     (async () => {
@@ -282,16 +271,47 @@ function StartScreen({ onGoCreate, onLoadById }) {
     })();
   }, []);
 
+  const handleMouseMove = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const px = (e.clientX - rect.left) / rect.width - 0.5;
+    const py = (e.clientY - rect.top) / rect.height - 0.5;
+    setTilt({ x: px * 16, y: py * -16 });
+  };
+  const resetTilt = () => setTilt({ x: 0, y: 0 });
+
   return (
-    <div className="landing">
+    <div className="landing" onMouseMove={handleMouseMove} onMouseLeave={resetTilt}>
       <div className="landing-decor" aria-hidden="true">
         <span className="drift d1">❤</span>
         <span className="drift d2">✦</span>
-        <span className="drift d3">❤</span>
-        <span className="drift d4">✦</span>
+        <span className="drift d3">💕</span>
+        <span className="drift d4">✧</span>
+        <span className="drift d5">💌</span>
+        <span className="drift d6">⭐</span>
+        <span className="drift d7">❤</span>
+        <span className="drift d8">✦</span>
+        <span className="drift d9">🌸</span>
+        <span className="drift d10">💫</span>
+        <span className="drift d11">✧</span>
+        <span className="drift d12">💕</span>
       </div>
 
-      <div className="landing-copy">
+      <div
+        className="landing-copy tilt-card"
+        style={{ transform: `perspective(900px) rotateX(${tilt.y}deg) rotateY(${tilt.x}deg)` }}
+      >
+        <div className="mascot-stage" aria-hidden="true">
+          <span className="orbit-ring ring-1" style={{ "--radius": "56px", animationDuration: "5s" }}>
+            <span className="orbit-dot" style={{ "--radius": "56px", animationDuration: "5s" }}>💗</span>
+          </span>
+          <span className="orbit-ring ring-2" style={{ "--radius": "44px", animationDuration: "7s", animationDirection: "reverse" }}>
+            <span className="orbit-dot" style={{ "--radius": "44px", animationDuration: "7s", animationDirection: "reverse" }}>✨</span>
+          </span>
+          <span className="orbit-ring ring-3" style={{ "--radius": "68px", animationDuration: "9s" }}>
+            <span className="orbit-dot" style={{ "--radius": "68px", animationDuration: "9s" }}>💫</span>
+          </span>
+          <span className="mascot-heart">💌</span>
+        </div>
         <p className="eyebrow">A Date for You</p>
         <h1 className="hero-title">
           Ask someone out<br />properly, for once.
@@ -574,49 +594,83 @@ function LocationStep({ invitation, activityId, selected, onSelect, onNext }) {
   );
 }
 
-function DateStep({ invitation, date, time, onDate, onTime, onNext }) {
-  const monthDate = new Date(invitation.availableDates[0] + "T00:00:00");
-  const year = monthDate.getFullYear();
-  const month = monthDate.getMonth();
-  const firstDay = new Date(year, month, 1);
+/* A reusable month grid with prev/next navigation, shared by the recipient's
+   date picker and the sender's "when are you free?" step. */
+function MonthCalendar({ isSelectable, isSelected, onSelect, initialDate }) {
+  const seed = initialDate ? new Date(initialDate + "T00:00:00") : new Date();
+  const today = new Date();
+  const [viewYear, setViewYear] = useState(seed.getFullYear());
+  const [viewMonth, setViewMonth] = useState(seed.getMonth());
+
+  const firstDay = new Date(viewYear, viewMonth, 1);
   const startWeekday = firstDay.getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
   const monthName = firstDay.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  const toStr = (d) => `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 
   const cells = [];
   for (let i = 0; i < startWeekday; i++) cells.push(null);
   for (let d = 1; d <= daysInMonth; d++) cells.push(d);
 
-  const toStr = (d) => `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  const isAtCurrentMonth = viewYear === today.getFullYear() && viewMonth === today.getMonth();
 
+  const goPrev = () => {
+    if (isAtCurrentMonth) return;
+    setViewMonth((m) => {
+      if (m === 0) { setViewYear((y) => y - 1); return 11; }
+      return m - 1;
+    });
+  };
+  const goNext = () => {
+    setViewMonth((m) => {
+      if (m === 11) { setViewYear((y) => y + 1); return 0; }
+      return m + 1;
+    });
+  };
+
+  return (
+    <div className="calendar">
+      <div className="calendar-nav">
+        <button className="cal-nav-btn" onClick={goPrev} disabled={isAtCurrentMonth} aria-label="Previous month">‹</button>
+        <p className="calendar-month">{monthName}</p>
+        <button className="cal-nav-btn" onClick={goNext} aria-label="Next month">›</button>
+      </div>
+      <div className="calendar-grid weekday-row">
+        {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => <span key={i}>{d}</span>)}
+      </div>
+      <div className="calendar-grid">
+        {cells.map((d, i) => {
+          if (!d) return <span key={i} className="cal-cell empty" />;
+          const str = toStr(d);
+          const selectable = isSelectable(str);
+          const selected = isSelected(str);
+          return (
+            <button
+              key={i}
+              className={`cal-cell ${selectable ? "available" : "disabled"} ${selected ? "selected" : ""}`}
+              disabled={!selectable}
+              onClick={() => onSelect(str)}
+            >
+              {d}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function DateStep({ invitation, date, time, onDate, onTime, onNext }) {
   return (
     <div className="stage fade-in">
       <h2 className="stage-title">When can I steal<br />you for a few hours?</h2>
 
-      <div className="calendar">
-        <p className="calendar-month">{monthName}</p>
-        <div className="calendar-grid weekday-row">
-          {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => <span key={i}>{d}</span>)}
-        </div>
-        <div className="calendar-grid">
-          {cells.map((d, i) => {
-            if (!d) return <span key={i} className="cal-cell empty" />;
-            const str = toStr(d);
-            const available = invitation.availableDates.includes(str);
-            const isSelected = date === str;
-            return (
-              <button
-                key={i}
-                className={`cal-cell ${available ? "available" : "disabled"} ${isSelected ? "selected" : ""}`}
-                disabled={!available}
-                onClick={() => onDate(str)}
-              >
-                {d}
-              </button>
-            );
-          })}
-        </div>
-      </div>
+      <MonthCalendar
+        initialDate={invitation.availableDates.find((d) => !isPastDate(d)) || invitation.availableDates[0]}
+        isSelectable={(str) => invitation.availableDates.includes(str) && !isPastDate(str)}
+        isSelected={(str) => date === str}
+        onSelect={onDate}
+      />
 
       {date && invitation.timeSlots[date] && (
         <div className="time-slots fade-in">
@@ -1165,18 +1219,6 @@ function CreateFlow({ onGenerated, onCancel }) {
     setSaving(false);
   };
 
-  const monthDate = form.availableDates[0] ? new Date(form.availableDates[0] + "T00:00:00") : new Date(2026, 7, 1);
-  const year = monthDate.getFullYear();
-  const month = monthDate.getMonth();
-  const firstDay = new Date(year, month, 1);
-  const startWeekday = firstDay.getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const monthName = firstDay.toLocaleDateString(undefined, { month: "long", year: "numeric" });
-  const cells = [];
-  for (let i = 0; i < startWeekday; i++) cells.push(null);
-  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
-  const toStr = (d) => `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-
   return (
     <div className="create-flow">
       <div className="create-header">
@@ -1251,21 +1293,13 @@ function CreateFlow({ onGenerated, onCancel }) {
         {step === 4 && (
           <>
             <h2 className="stage-title small">When are you free?</h2>
-            <p className="stage-body">Tap dates to mark them available, then add whatever times actually work — morning, afternoon, evening, whatever.</p>
-            <div className="calendar">
-              <p className="calendar-month">{monthName}</p>
-              <div className="calendar-grid weekday-row">{["S", "M", "T", "W", "T", "F", "S"].map((d, i) => <span key={i}>{d}</span>)}</div>
-              <div className="calendar-grid">
-                {cells.map((d, i) => {
-                  if (!d) return <span key={i} className="cal-cell empty" />;
-                  const str = toStr(d);
-                  const isOn = form.availableDates.includes(str);
-                  return (
-                    <button key={i} className={`cal-cell available ${isOn ? "selected" : ""}`} onClick={() => toggleDate(str)}>{d}</button>
-                  );
-                })}
-              </div>
-            </div>
+            <p className="stage-body">Tap dates to mark them available, then add whatever times actually work — morning, afternoon, evening, whatever. Use the arrows to check other months.</p>
+            <MonthCalendar
+              initialDate={form.availableDates[0]}
+              isSelectable={(str) => !isPastDate(str)}
+              isSelected={(str) => form.availableDates.includes(str)}
+              onSelect={toggleDate}
+            />
 
             {form.availableDates.length > 0 && (
               <div className="time-editor-list">
@@ -1310,7 +1344,7 @@ function CreateFlow({ onGenerated, onCancel }) {
                     onClick={() => set("theme", key)}
                   >
                     <span style={{ color: t.accent }}>{t.seal}</span> {t.label}
-                    {isSelected && <span className="theme-check" style={{ background: t.accent }}>✓</span>}
+                    {isSelected && <span className="theme-check" style={{ background: t.accent, color: t.onAccent }}>✓</span>}
                   </button>
                 );
               })}
@@ -1447,7 +1481,7 @@ function App() {
         * { box-sizing: border-box; }
         .app-root {
           --bg: ${theme.bg}; --bg-alt: ${theme.bgAlt}; --card: ${theme.card};
-          --accent: ${theme.accent}; --accent-soft: ${theme.accentSoft};
+          --accent: ${theme.accent}; --accent-soft: ${theme.accentSoft}; --on-accent: ${theme.onAccent};
           --text: ${theme.text}; --text-muted: ${theme.textMuted};
           --font-display: ${theme.displayFont}; --font-body: ${theme.bodyFont};
           background: linear-gradient(180deg, var(--bg), var(--bg-alt));
@@ -1478,13 +1512,56 @@ function App() {
 
         /* ---------- Landing ---------- */
         .landing { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 40px 20px; position: relative; }
-        .landing-decor { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
-        .drift { position: absolute; color: var(--accent-soft); opacity: 0.6; font-size: 1.6rem; animation: drift 9s ease-in-out infinite; }
+        .landing-decor { position: absolute; inset: 0; pointer-events: none; overflow: hidden; perspective: 700px; }
+        .drift {
+          position: absolute; color: var(--accent-soft); opacity: 0.7; font-size: 1.6rem;
+          animation: drift3d 7s ease-in-out infinite; transform-style: preserve-3d; will-change: transform;
+        }
         .d1 { top: 12%; left: 8%; animation-delay: 0s; }
         .d2 { top: 70%; left: 12%; animation-delay: 1.5s; font-size: 1.1rem; }
         .d3 { top: 20%; right: 10%; animation-delay: 3s; font-size: 1.2rem; }
         .d4 { top: 75%; right: 14%; animation-delay: 4.5s; }
-        @keyframes drift { 0%,100% { transform: translateY(0px) rotate(0deg); } 50% { transform: translateY(-18px) rotate(8deg); } }
+        .d5 { top: 45%; left: 5%; animation-delay: 2.2s; font-size: 1.4rem; }
+        .d6 { top: 10%; left: 45%; animation-delay: 5.2s; font-size: 1rem; }
+        .d7 { top: 60%; right: 6%; animation-delay: 1s; font-size: 1.3rem; }
+        .d8 { top: 88%; left: 40%; animation-delay: 3.8s; font-size: 1.1rem; }
+        .d9 { top: 30%; left: 22%; animation-delay: 0.6s; font-size: 1.5rem; }
+        .d10 { top: 55%; right: 24%; animation-delay: 2.8s; font-size: 1.2rem; }
+        .d11 { top: 8%; right: 32%; animation-delay: 4.2s; font-size: 1rem; }
+        .d12 { top: 82%; right: 40%; animation-delay: 1.8s; font-size: 1.3rem; }
+        @keyframes drift3d {
+          0%, 100% { transform: translateY(0px) rotateX(0deg) rotateY(0deg) rotateZ(0deg) scale(1); }
+          25% { transform: translateY(-18px) rotateX(24deg) rotateY(20deg) rotateZ(10deg) scale(1.08); }
+          50% { transform: translateY(-30px) rotateX(-18deg) rotateY(-24deg) rotateZ(-8deg) scale(0.94); }
+          75% { transform: translateY(-14px) rotateX(14deg) rotateY(12deg) rotateZ(6deg) scale(1.05); }
+        }
+
+        .tilt-card { transition: transform 0.15s ease-out; transform-style: preserve-3d; }
+
+        .mascot-stage { position: relative; width: 140px; height: 140px; margin: 0 auto 4px; perspective: 700px; }
+        .mascot-heart {
+          position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+          font-size: 3.4rem; transform-style: preserve-3d; z-index: 2;
+          animation: mascotTumble 5s ease-in-out infinite; filter: drop-shadow(0 12px 16px rgba(0,0,0,0.2));
+        }
+        @keyframes mascotTumble {
+          0%, 100% { transform: translateY(0) rotateY(0deg) rotateX(0deg) rotateZ(0deg) scale(1); }
+          20% { transform: translateY(-10px) rotateY(24deg) rotateX(8deg) rotateZ(-5deg) scale(1.05); }
+          45% { transform: translateY(-18px) rotateY(-20deg) rotateX(-10deg) rotateZ(5deg) scale(1.1); }
+          70% { transform: translateY(-8px) rotateY(14deg) rotateX(5deg) rotateZ(-3deg) scale(1.03); }
+        }
+
+        .orbit-ring { position: absolute; inset: 0; animation: orbitSpin linear infinite; transform-style: preserve-3d; z-index: 1; }
+        @keyframes orbitSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .orbit-dot {
+          position: absolute; top: 50%; left: 50%; font-size: 1.15rem;
+          transform: translate(-50%, -50%) translateY(calc(-1 * var(--radius, 56px)));
+          animation: counterSpin linear infinite; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.15));
+        }
+        @keyframes counterSpin {
+          from { transform: translate(-50%, -50%) translateY(calc(-1 * var(--radius, 56px))) rotate(0deg); }
+          to { transform: translate(-50%, -50%) translateY(calc(-1 * var(--radius, 56px))) rotate(-360deg); }
+        }
 
         .landing-copy { max-width: 460px; text-align: center; position: relative; z-index: 1; }
         .hero-title { font-family: var(--font-display); font-style: ${theme.displayStyle}; font-weight: 500; font-size: 2.6rem; line-height: 1.14; margin: 0 0 12px; letter-spacing: -0.01em; }
@@ -1515,7 +1592,7 @@ function App() {
         .envelope.opening .envelope-flap { transform: rotateX(180deg); }
         .envelope-seal {
           position: absolute; top: 38%; left: 50%; transform: translate(-50%,-50%);
-          width: 34px; height: 34px; border-radius: 50%; background: var(--accent); color: #fff;
+          width: 34px; height: 34px; border-radius: 50%; background: var(--accent); color: var(--on-accent);
           display: flex; align-items: center; justify-content: center; font-size: 0.95rem; z-index: 4;
           box-shadow: 0 2px 6px rgba(0,0,0,0.25); transition: opacity 0.3s ease;
         }
@@ -1546,11 +1623,12 @@ function App() {
         .seal-btn {
           font-family: var(--font-body); font-weight: 600; font-size: 0.92rem;
           padding: 13px 26px; border-radius: 30px; border: none; cursor: pointer;
-          background: var(--accent); color: #fff; transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.2s ease;
+          background: var(--accent); color: var(--on-accent); transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.2s ease;
           box-shadow: 0 6px 16px -6px color-mix(in srgb, var(--accent) 60%, transparent);
           text-decoration: none; display: inline-block;
         }
         .seal-btn.pressed { transform: scale(0.94); }
+        .seal-btn:hover:not(:disabled):not(.pressed) { transform: translateY(-3px) rotateX(6deg); }
         .seal-btn:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
         .seal-btn.ghost { background: transparent; color: var(--accent); border: 1.5px solid var(--accent-soft); box-shadow: none; }
         .seal-btn.preview-disabled { pointer-events: none; opacity: 0.85; }
@@ -1575,7 +1653,7 @@ function App() {
           width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
           font-size: 0.66rem; font-weight: 700; background: var(--accent-soft); color: var(--text-muted); transition: all 0.3s ease;
         }
-        .thread-node.on .thread-num { background: var(--accent); color: #fff; }
+        .thread-node.on .thread-num { background: var(--accent); color: var(--on-accent); }
         .thread-node.current .thread-num { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 20%, transparent); }
         .thread-label { font-size: 0.6rem; color: var(--text-muted); white-space: nowrap; display: none; }
         .thread-node.current .thread-label { display: block; color: var(--accent); font-weight: 600; }
@@ -1598,7 +1676,7 @@ function App() {
         .option-desc { font-size: 0.78rem; color: var(--text-muted); line-height: 1.4; }
         .check-badge {
           position: absolute; top: 10px; right: 10px; width: 20px; height: 20px; border-radius: 50%;
-          background: var(--accent); color: #fff; font-size: 0.7rem; display: flex; align-items: center; justify-content: center;
+          background: var(--accent); color: var(--on-accent); font-size: 0.7rem; display: flex; align-items: center; justify-content: center;
           animation: popIn 0.3s ease;
         }
         @keyframes popIn { from { transform: scale(0); } to { transform: scale(1); } }
@@ -1620,8 +1698,17 @@ function App() {
 
         /* ---------- Calendar ---------- */
         .calendar { background: var(--card); border-radius: 18px; padding: 18px; margin-bottom: 20px; box-shadow: 0 3px 12px -6px rgba(0,0,0,0.15); }
-        .calendar-month { text-align: center; font-weight: 600; margin: 0 0 12px; font-family: var(--font-display); font-size: 1.1rem; }
+        .calendar-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+        .calendar-month { text-align: center; font-weight: 600; margin: 0; font-family: var(--font-display); font-size: 1.1rem; flex: 1; }
+        .cal-nav-btn {
+          background: var(--bg-alt); border: none; color: var(--text); width: 30px; height: 30px; border-radius: 50%;
+          font-size: 1.1rem; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center;
+          transition: transform 0.15s ease, background 0.2s ease;
+        }
+        .cal-nav-btn:hover:not(:disabled) { transform: scale(1.1); background: var(--accent-soft); }
+        .cal-nav-btn:disabled { opacity: 0.25; cursor: not-allowed; }
         .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+        .weekday-row { margin-top: 10px; }
         .weekday-row span { text-align: center; font-size: 0.68rem; color: var(--text-muted); font-weight: 600; }
         .cal-cell {
           aspect-ratio: 1; border: none; border-radius: 10px; background: transparent; font-family: var(--font-body);
@@ -1631,7 +1718,7 @@ function App() {
         .cal-cell.disabled { opacity: 0.3; }
         .cal-cell.available { color: var(--text); background: var(--bg-alt); cursor: pointer; transition: transform 0.15s ease, background 0.2s ease; }
         .cal-cell.available:hover { transform: scale(1.08); }
-        .cal-cell.selected { background: var(--accent); color: #fff; transform: scale(1.05); font-weight: 700; }
+        .cal-cell.selected { background: var(--accent); color: var(--on-accent); transform: scale(1.05); font-weight: 700; }
 
         .time-slots { margin-bottom: 20px; }
         .slots-label { font-size: 0.82rem; color: var(--text-muted); margin: 0 0 10px; }
@@ -1640,7 +1727,7 @@ function App() {
           padding: 9px 16px; border-radius: 20px; border: 1.5px solid var(--accent-soft); background: var(--card);
           color: var(--text); font-family: var(--font-body); font-size: 0.84rem; cursor: pointer; transition: all 0.2s ease;
         }
-        .slot-pill.selected { background: var(--accent); border-color: var(--accent); color: #fff; }
+        .slot-pill.selected { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 
         /* ---------- Letter ---------- */
         .letter-card {
