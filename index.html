@@ -317,43 +317,10 @@ function StartScreen({ onGoCreate, onLoadById }) {
           Ask someone out<br />properly, for once.
         </h1>
         <p className="hero-sub">
-          Less overthinking, more actually grabbing coffee together.
+          Build a little invitation, send the link, and let them open it themselves.
         </p>
 
         <SealButton onClick={onGoCreate}>Create an Invitation ✎</SealButton>
-
-        {myInvitations && myInvitations.length > 0 && (
-          <div className="my-invites">
-            <div className="my-invites-header">
-              <p className="my-invites-title">Invitations you've sent</p>
-              <button
-                className="link-btn tiny"
-                onClick={async () => {
-                  try { await storage.delete("my-invitations", false); } catch (e) {}
-                  setMyInvitations([]);
-                }}
-              >
-                clear all
-              </button>
-            </div>
-            {myInvitations.map((inv) => (
-              <div className="my-invite-row" key={inv.id}>
-                <span className="my-invite-name">{inv.recipientName}</span>
-                <button
-                  className="icon-x"
-                  aria-label={`Remove ${inv.recipientName}`}
-                  onClick={async () => {
-                    const updated = myInvitations.filter((i) => i.id !== inv.id);
-                    setMyInvitations(updated);
-                    try { await storage.set("my-invitations", JSON.stringify(updated), false); } catch (e) {}
-                  }}
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   );
